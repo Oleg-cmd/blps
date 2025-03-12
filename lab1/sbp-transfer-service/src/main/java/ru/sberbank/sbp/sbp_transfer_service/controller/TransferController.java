@@ -13,6 +13,8 @@ import ru.sberbank.sbp.sbp_transfer_service.dto.TransferConfirmationResponse;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import java.util.HashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/transfers")
@@ -26,6 +28,10 @@ public class TransferController {
         this.transferService = transferService;
     }
 
+    /**
+     * Эндпоинт для создания нового перевода
+     * Требует номер телефона отправителя в заголовке X-Phone-Number
+     */
     @PostMapping
     public ResponseEntity<TransferInitiationResponse> initiateTransfer(
             @Valid @RequestBody InitiateTransferRequest request,
@@ -41,6 +47,10 @@ public class TransferController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
+    /**
+     * Эндпоинт для подтверждения перевода
+     * Принимает код подтверждения и ID перевода
+     */
     @PostMapping("/{transferId}/confirm")
     public ResponseEntity<TransferConfirmationResponse> confirmTransfer(
             @PathVariable UUID transferId,
@@ -55,17 +65,33 @@ public class TransferController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Эндпоинт для проверки статуса перевода
+     * Доступен только отправителю перевода
+     */
     @GetMapping("/{transferId}")
-    public ResponseEntity<Transfer> getTransferStatus(
+    public ResponseEntity<Object> getTransferStatus( // Изменили ResponseEntity<Transfer> на ResponseEntity<Object>
             @PathVariable UUID transferId,
             @RequestHeader("X-Phone-Number") String senderPhoneNumber) {
-            
+
+        log.info("getTransferStatus: Received status request for transferId={}, senderPhoneNumber={}", transferId, senderPhoneNumber);
+
         Transfer transfer = transferService.getTransferStatus(transferId);
-        
-        if (!transfer.getSenderPhoneNumber().equals(senderPhoneNumber)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+
+        if (transfer == null) {
+            log.warn("getTransferStatus: Transfer not found for transferId={}", transferId);
+            return ResponseEntity.notFound().build();
         }
-        
+
+        if (!transfer.getSenderPhoneNumber().equals(senderPhoneNumber)) {
+            log.warn("getTransferStatus: Unauthorized access attempt. Transfer sender={}, request sender={}", transfer.getSenderPhoneNumber(), senderPhoneNumber);
+            // Возвращаем JSON с сообщением об ошибке и статусом 403
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("message", "Unauthorized access");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse);
+        }
+
+        log.info("getTransferStatus: Successfully returned status for transferId={}", transferId);
         return ResponseEntity.ok(transfer);
     }
 }

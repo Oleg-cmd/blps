@@ -15,6 +15,10 @@ import java.time.LocalDateTime;
 @Slf4j
 public class SbpSystemServiceImpl implements SbpSystemService {
 
+    /**
+     * Поиск банка получателя по номеру телефона
+     * В реальной системе делает запрос к СБП
+     */
     @Override
     public BankInfo findRecipientBank(String phoneNumber) {
         log.info("Looking up bank for phone number {}", phoneNumber);
@@ -34,6 +38,10 @@ public class SbpSystemServiceImpl implements SbpSystemService {
         return true;
     }
 
+    /**
+     * Обработка перевода через СБП
+     * Симуляция взаимодействия с внешней системой
+     */
     @Override
     public String processTransfer(Transfer transfer) {
         log.info("Processing transfer {} through FPS", transfer.getId());
@@ -48,6 +56,10 @@ public class SbpSystemServiceImpl implements SbpSystemService {
         throw new SbpSystemException("FPS transfer processing failed");
     }
 
+    /**
+     * Ожидание подтверждения от СБП
+     * Симуляция асинхронного ответа от внешней системы
+     */
     @Override
     public FpsTransferResult waitForFpsConfirmation(String sbpTransactionId) {
         log.info("Waiting for FPS confirmation for transaction {}", sbpTransactionId);

@@ -25,7 +25,7 @@ post_json() {
 get_json() {
     local url="$1"
     local phone_number="$2"
-    curl -s -X GET "$url" \
+    curl -v -X GET "$url" \
         -H "X-Phone-Number: $phone_number"
 }
 
