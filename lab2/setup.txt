@@ -1,0 +1,42 @@
+CREATE USER sbp_lab_admin WITH LOGIN CREATEDB PASSWORD 'your_admin_password';
+
+psql -U sbp_lab_admin -d postgres -W
+
+
+-- База и пользователь для transfer-service
+CREATE DATABASE transfer_db;
+CREATE USER transfer_user WITH PASSWORD 'your_transfer_password';
+-- Даем все права на конкретную базу
+GRANT ALL PRIVILEGES ON DATABASE transfer_db TO transfer_user;
+-- Назначим владельцем (опционально, но полезно)
+ALTER DATABASE transfer_db OWNER TO transfer_user;
+
+-- База и пользователь для account-service
+CREATE DATABASE account_db;
+CREATE USER account_user WITH PASSWORD 'your_account_password';
+GRANT ALL PRIVILEGES ON DATABASE account_db TO account_user;
+ALTER DATABASE account_db OWNER TO account_user;
+
+-- Проверим список баз и их владельцев
+\l
+
+
+
+настройки psql
+/opt/homebrew/var/postgresql@14
+
+postgresql.conf
+max_prepared_transactions = 50   # default is 0
+
+ SHOW max_prepared_transactions;
+
+
+
+curl -X POST http://localhost:8080/api/transfers \
+         -H "Content-Type: application/json" \
+         -H "X-Phone-Number: 9991112222" \
+         -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 75.00,
+       "bankId": "another-bank"
+     }'

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/lab2.iml" filepath="$PROJECT_DIR$/.idea/lab2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/sbp-adapter-service/src/main/main.iml" filepath="$PROJECT_DIR$/sbp-adapter-service/src/main/main.iml" />
+      <module fileurl="file://$PROJECT_DIR$/transfer-service/src/main/main2.iml" filepath="$PROJECT_DIR$/transfer-service/src/main/main2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/account-service/src/main/main3.iml" filepath="$PROJECT_DIR$/account-service/src/main/main3.iml" />
+      <module fileurl="file://$PROJECT_DIR$/notification-service/src/main/main4.iml" filepath="$PROJECT_DIR$/notification-service/src/main/main4.iml" />
+      <module fileurl="file://$PROJECT_DIR$/account-service/src/test/test.iml" filepath="$PROJECT_DIR$/account-service/src/test/test.iml" />
+      <module fileurl="file://$PROJECT_DIR$/transfer-service/src/test/test2.iml" filepath="$PROJECT_DIR$/transfer-service/src/test/test2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/notification-service/src/test/test3.iml" filepath="$PROJECT_DIR$/notification-service/src/test/test3.iml" />
+      <module fileurl="file://$PROJECT_DIR$/sbp-adapter-service/src/test/test4.iml" filepath="$PROJECT_DIR$/sbp-adapter-service/src/test/test4.iml" />
+    </modules>
+  </component>
+</project>

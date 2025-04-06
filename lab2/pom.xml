@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ru.sberbank.sbp.lab2</groupId>
+    <artifactId>sbp-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>SBP Lab2 Parent</name>
+
+    <properties>
+        <java.version>17</java.version>
+        <spring-boot.version>3.1.5</spring-boot.version>
+        <springdoc-openapi.version>2.2.0</springdoc-openapi.version>
+        <lombok.version>1.18.30</lombok.version>
+
+        <atomikos-starter.version>6.0.0</atomikos-starter.version> <!-- Версия стартера Atomikos для Boot 3 -->
+        <jakarta-transaction-api.version>2.0.1</jakarta-transaction-api.version> <!-- Версия Jakarta Transaction API -->
+    </properties>
+
+    <modules>
+        <module>account-service</module>
+        <module>transfer-service</module>
+        <module>notification-service</module>
+        <module>sbp-adapter-service</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            
+             <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc-openapi.version}</version>
+            </dependency>
+             <!-- Управление версией Lombok -->
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+                <optional>true</optional>
+            </dependency>
+            
+            <dependency>
+           <groupId>com.atomikos</groupId>
+           <artifactId>transactions-spring-boot3-starter</artifactId>
+           <version>${atomikos-starter.version}</version>
+        </dependency>
+
+        <!-- Jakarta Transaction API (вместо javax.transaction:jta) -->
+        <dependency>
+            <groupId>jakarta.transaction</groupId>
+            <artifactId>jakarta.transaction-api</artifactId>
+            <version>${jakarta-transaction-api.version}</version>
+        </dependency>
+        
+            
+        </dependencies>
+
+    </dependencyManagement>
+
+     <dependencies>
+         <!-- Lombok будет доступен всем модулям -->
+         <dependency>
+             <groupId>org.projectlombok</groupId>
+             <artifactId>lombok</artifactId>
+             <!-- Версия управляется -->
+             <optional>true</optional>
+         </dependency>
+          <!-- Общий тестовый стартер -->
+         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+     </dependencies>
+
+    <build>
+        <pluginManagement>
+             <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                     <configuration>
+                        <excludes>
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+                 <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <!-- Версия обычно управляется Spring Boot BOM -->
+                    <configuration>
+                        <source>${java.version}</source>
+                        <target>${java.version}</target>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+         <plugins>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-compiler-plugin</artifactId>
+             </plugin>
+         </plugins>
+    </build>
+</project>
