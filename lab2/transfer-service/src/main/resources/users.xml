@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<users>
+    <!--
+        Пароли здесь хранятся в виде BCrypt хеша.
+        Генерация хеша: new BCryptPasswordEncoder().encode("пароль")
+
+        Пример для пароля "userpass":
+        $2a$12$RCay63g85IhC.9Qj6YPcVeZtNOtCKtAJhutun/3gwwBxaAlQ0iJeu
+
+        Пример для пароля "adminpass":
+        $2a$12$N9zYCGcR5zoXZdNmjGvgLOQCT7RJIOKq/cNcevCfjpjdItVWtvpfe
+    -->
+    <user username="user"
+          password="$2a$12$RCay63g85IhC.9Qj6YPcVeZtNOtCKtAJhutun/3gwwBxaAlQ0iJeu"
+          roles="ROLE_USER"/>
+    <user username="admin"
+          password="$2a$12$N9zYCGcR5zoXZdNmjGvgLOQCT7RJIOKq/cNcevCfjpjdItVWtvpfe"
+          roles="ROLE_USER,ROLE_ADMIN"/>
+</users>

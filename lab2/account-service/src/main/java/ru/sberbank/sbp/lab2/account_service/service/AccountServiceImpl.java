@@ -2,7 +2,9 @@ package ru.sberbank.sbp.lab2.account_service.service;
 
 import jakarta.transaction.Transactional;
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -13,36 +15,12 @@ import ru.sberbank.sbp.lab2.account_service.exception.AccountNotFoundException;
 import ru.sberbank.sbp.lab2.account_service.exception.InsufficientFundsException;
 import ru.sberbank.sbp.lab2.account_service.repository.AccountRepository;
 
-@Service // Помечаем класс как сервис Spring
-@RequiredArgsConstructor // Lombok: создает конструктор для final полей
-@Slf4j // Lombok: добавляет логгер
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class AccountServiceImpl implements AccountService {
 
   private final AccountRepository accountRepository;
-
-  // Базовая реализация поиска или создания счета
-  // Делаем transactional, чтобы поиск и создание были атомарны
-  @Override
-  @Transactional // propagation = REQUIRED - стандартное поведение
-  public Account findOrCreateAccount(String phoneNumber) {
-    log.info("Finding or creating account for phone number: {}", phoneNumber);
-    // synchronized - простой способ избежать гонки при создании одного и того же счета
-    // В реальной системе нужна более надежная блокировка на уровне БД или внешняя
-    synchronized (phoneNumber.intern()) {
-      return accountRepository
-        .findByPhoneNumber(phoneNumber)
-        .orElseGet(() -> {
-          log.info("Account not found, creating a new one for {}", phoneNumber);
-          // Устанавливаем начальный баланс, например 100000
-          Account newAccount = Account.builder()
-            .phoneNumber(phoneNumber)
-            .balance(new BigDecimal("100000.00")) // Начальный баланс для тестов
-            .reservedAmount(BigDecimal.ZERO)
-            .build();
-          return accountRepository.save(newAccount);
-        });
-    }
-  }
 
   // Проверка баланса - операция чтения
   @Override
@@ -90,20 +68,13 @@ public class AccountServiceImpl implements AccountService {
     );
   }
 
-  // Освобождение резерва - операция записи
-  @Override
+  // Только для внутреннего использования
   @Transactional
-  public void releaseReservedFunds(String phoneNumber, BigDecimal amount) {
-    log.info(
-      "Releasing reserved funds {} for phone number: {}",
-      amount,
-      phoneNumber
-    );
-    if (amount.compareTo(BigDecimal.ZERO) < 0) {
-      throw new IllegalArgumentException("Cannot release negative amount");
-    }
+  protected void releaseReservedFundsInternal(
+    String phoneNumber,
+    BigDecimal amount
+  ) {
     Account account = getAccountByPhoneNumber(phoneNumber);
-
     BigDecimal newReserved = account.getReservedAmount().subtract(amount);
     if (newReserved.compareTo(BigDecimal.ZERO) < 0) {
       log.error(
@@ -112,32 +83,86 @@ public class AccountServiceImpl implements AccountService {
         account.getReservedAmount(),
         phoneNumber
       );
-      // Можно выбросить исключение или просто установить в 0
       newReserved = BigDecimal.ZERO;
-      // throw new IllegalStateException("Cannot release more funds than reserved for " + phoneNumber);
     }
-
     account.setReservedAmount(newReserved);
-    accountRepository.save(account);
+    // Не сохраняем здесь, сохранение будет в вызывающем методе (completeTransfer)
     log.info(
-      "Reserved funds released successfully for {}. New reserved amount: {}",
+      "Internal releaseReservedFunds: New reserved amount for {}: {}",
       phoneNumber,
-      account.getReservedAmount()
+      newReserved
     );
   }
 
-  // Завершение перевода - операция записи (пока без получателя)
-  // ВАЖНО: Эта реализация НЕ атомарна для двух счетов без JTA!
-  // Пока сделаем только списание с отправителя.
   @Override
-  @Transactional
-  public void completeFundsTransfer(
-    String senderPhoneNumber,
-    String recipientPhoneNumber,
-    BigDecimal amount
+  @Transactional // Участвует в JTA транзакции слушателя
+  public void releaseFunds(
+    String phoneNumber,
+    BigDecimal amount,
+    UUID correlationId
   ) {
     log.info(
-      "Completing transfer of {} from {} to {}",
+      "[CorrelationId: {}] Releasing reserved funds {} for phone number: {}",
+      correlationId,
+      amount,
+      phoneNumber
+    );
+    if (amount.compareTo(BigDecimal.ZERO) < 0) {
+      // Можно просто залогировать и выйти, т.к. это не ошибка бизнес-процесса
+      log.warn(
+        "[CorrelationId: {}] Cannot release negative amount: {}",
+        correlationId,
+        amount
+      );
+      return;
+    }
+
+    try {
+      Account account = getAccountByPhoneNumber(phoneNumber); // Ищем счет
+
+      BigDecimal newReserved = account.getReservedAmount().subtract(amount);
+      if (newReserved.compareTo(BigDecimal.ZERO) < 0) {
+        log.warn(
+          // Логируем как WARN, т.к. это может быть при повторной обработке
+          "[CorrelationId: {}] Attempted to release more funds ({}) than reserved ({}) for {}. Setting reserved to 0.",
+          correlationId,
+          amount,
+          account.getReservedAmount(),
+          phoneNumber
+        );
+        newReserved = BigDecimal.ZERO;
+      }
+      account.setReservedAmount(newReserved);
+      accountRepository.save(account); // Сохраняем изменения
+      log.info(
+        "[CorrelationId: {}] Reserved funds released successfully for {}. New reserved amount: {}",
+        correlationId,
+        phoneNumber,
+        account.getReservedAmount()
+      );
+    } catch (AccountNotFoundException e) {
+      // Если счет не найден - это нормально в этом сценарии (возможно, резерв и не создавался).
+      // Просто логируем и НЕ бросаем исключение дальше, чтобы JTA закоммитила транзакцию JMS.
+      log.warn(
+        "[CorrelationId: {}] Account not found while trying to release funds for phone number: {}. Assuming reservation was not made or already cancelled.",
+        correlationId,
+        phoneNumber
+      );
+    }
+    // Другие RuntimeException будут пойманы и обработаны в слушателе
+  }
+
+  @Override
+  @Transactional
+  public void completeTransfer(
+    String senderPhoneNumber,
+    String recipientPhoneNumber,
+    BigDecimal amount,
+    UUID correlationId
+  ) {
+    log.info(
+      "[CorrelationId: {}] Completing transfer of {} from {} to {}",
+      correlationId,
       amount,
       senderPhoneNumber,
       recipientPhoneNumber
@@ -146,12 +171,15 @@ public class AccountServiceImpl implements AccountService {
       throw new IllegalArgumentException("Cannot transfer negative amount");
     }
 
+    // 1. Найти счет отправителя (он должен существовать)
     Account senderAccount = getAccountByPhoneNumber(senderPhoneNumber);
 
-    // Проверяем, достаточно ли зарезервировано (хотя release должен был проверить)
+    // 2. Проверить зарезервированную сумму отправителя
+    // Эта проверка остается важной на случай гонки или неконсистентности
     if (senderAccount.getReservedAmount().compareTo(amount) < 0) {
       log.error(
-        "Attempt to complete transfer for {}, but reserved amount {} is less than transfer amount {}",
+        "[CorrelationId: {}] Attempt to complete transfer for sender {}, but reserved amount {} is less than transfer amount {}",
+        correlationId,
         senderPhoneNumber,
         senderAccount.getReservedAmount(),
         amount
@@ -162,32 +190,41 @@ public class AccountServiceImpl implements AccountService {
       );
     }
 
-    // Уменьшаем резерв и баланс отправителя
-    senderAccount.setReservedAmount(
-      senderAccount.getReservedAmount().subtract(amount)
-    );
+    // 3. Найти счет получателя (он ТОЖЕ должен существовать)
+    Account recipientAccount = getAccountByPhoneNumber(recipientPhoneNumber);
+
+    // 4. Выполнить дебет отправителя
+    // Сначала вызываем внутренний метод для уменьшения резерва (без сохранения)
+    releaseReservedFundsInternal(senderPhoneNumber, amount);
+    // Затем уменьшаем баланс
     senderAccount.setBalance(senderAccount.getBalance().subtract(amount));
-    accountRepository.save(senderAccount);
     log.info(
-      "Debited amount {} from sender {}. New balance: {}, New reserved: {}",
+      "[CorrelationId: {}] Debited amount {} from sender {}. New balance: {}, New reserved: {}",
+      correlationId,
       amount,
       senderPhoneNumber,
       senderAccount.getBalance(),
       senderAccount.getReservedAmount()
     );
 
-    // TODO: Зачисление получателю - будет добавлено, когда настроим JTA
-    // Account recipientAccount = findOrCreateAccount(recipientPhoneNumber); // Найти или создать
-    // recipientAccount.setBalance(recipientAccount.getBalance().add(amount));
-    // accountRepository.save(recipientAccount);
-    log.warn(
-      "Recipient crediting for {} is NOT implemented yet!",
-      recipientPhoneNumber
+    // 5. Выполнить кредит получателя
+    recipientAccount.setBalance(recipientAccount.getBalance().add(amount));
+    log.info(
+      "[CorrelationId: {}] Credited amount {} to recipient {}. New balance: {}",
+      correlationId,
+      amount,
+      recipientPhoneNumber,
+      recipientAccount.getBalance()
     );
 
+    // 6. Сохранить оба измененных счета АТОМАРНО
+    // Передаем обновленные объекты senderAccount и recipientAccount
+    accountRepository.saveAll(Arrays.asList(senderAccount, recipientAccount));
     log.info(
-      "Funds transfer (debit part) completed for sender {}",
-      senderPhoneNumber
+      "[CorrelationId: {}] Successfully saved changes for sender {} and recipient {}",
+      correlationId,
+      senderPhoneNumber,
+      recipientPhoneNumber
     );
   }
 

@@ -9,12 +9,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 // Импортируем DTO и сервисы из правильных пакетов
 import ru.sberbank.sbp.lab2.transfer_service.dto.*;
-import ru.sberbank.sbp.lab2.transfer_service.entity.Transfer; // Пока для возврата статуса
-import ru.sberbank.sbp.lab2.transfer_service.service.TransferService; // Интерфейс сервиса
+import ru.sberbank.sbp.lab2.transfer_service.entity.Transfer;
+import ru.sberbank.sbp.lab2.transfer_service.service.TransferService;
 
 @RestController
-@RequestMapping("/api/transfers") // Базовый путь для всех эндпоинтов контроллера
-@RequiredArgsConstructor // Внедрение зависимостей через конструктор
+@RequestMapping("/api/transfers")
+@RequiredArgsConstructor
 @Slf4j
 public class TransferController {
 
@@ -86,18 +86,9 @@ public class TransferController {
     // Вызов метода сервиса
     Transfer transfer = transferService.getTransferStatus(transferId);
 
-    // TODO: Проверка авторизации (владелец или админ) будет добавлена позже
-
     // Возвращаем найденный перевод и код 200 OK
     // Если сервис не найдет перевод, он должен бросить исключение (например, TransferNotFoundException),
     // которое будет обработано глобальным обработчиком исключений (создадим позже) и вернет 404.
     return ResponseEntity.ok(transfer);
   }
-  // TODO: Добавить эндпоинт для получения истории переводов (GET /api/transfers)
-  // @GetMapping
-  // public ResponseEntity<List<Transfer>> getTransferHistory(
-  //      @RequestHeader("X-Phone-Number") String senderPhoneNumber,
-  //      @RequestParam(defaultValue = "0") int page,
-  //      @RequestParam(defaultValue = "10") int size) { ... }
-
 }

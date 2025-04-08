@@ -10,11 +10,10 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class ReserveFundsCommand implements Serializable { // Должен быть Serializable
+public class ReleaseFundsCommand implements Serializable {
 
   private static final long serialVersionUID = 1L;
-
   private String phoneNumber;
   private BigDecimal amount;
-  private UUID correlationId; // ID перевода
+  private UUID correlationId;
 }

@@ -40,3 +40,130 @@ curl -X POST http://localhost:8080/api/transfers \
        "amount": 75.00,
        "bankId": "another-bank"
      }'
+
+
+INSERT INTO accounts (phone_number, balance, reserved_amount, version) VALUES ('9991112222', 10000.00, 0.00, 0);
+
+
+curl -X POST http://localhost:8080/api/transfers \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 75.00,
+       "bankId": "another-bank"
+     }'
+
+
+
+
+
+TRANSFER_ID="85c63f5c-862d-4c03-8b7d-a26e068fe496"
+CONFIRMATION_CODE="537509"
+
+curl -X POST http://localhost:8080/api/transfers/85c63f5c-862d-4c03-8b7d-a26e068fe496/confirm \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "confirmationCode": "537509"
+     }'
+
+
+
+curl -X POST http://localhost:8080/api/transfers/85c63f5c-862d-4c03-8b7d-a26e068fe496/confirm \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "confirmationCode": "537509"
+     }' \
+      -i --user user:wrongpassword 
+
+    curl -X POST http://localhost:8080/api/transfers/85c63f5c-862d-4c03-8b7d-a26e068fe496/confirm \
+        -H "Content-Type: application/json" \
+        -H "X-Phone-Number: 9991112222" \
+        -d '{
+        "confirmationCode": "537509"
+        }' \
+        -i --user user:userpass
+
+
+     
+     curl -X POST http://localhost:8080/api/transfers/85c63f5c-862d-4c03-8b7d-a26e068fe496/confirm \
+        -H "Content-Type: application/json" \
+        -H "X-Phone-Number: 9991112222" \
+        -d '{
+        "confirmationCode": "537509"
+        }' \
+        -i --user admin:adminpass
+
+
+ТЕСТОВЫЕ СЦЕНАРИИ:
+
+
+Доступ без аутентификации
+curl -v -X POST http://localhost:8080/api/transfers \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 10.00,
+       "bankId": "test-bank"
+     }'
+
+
+Доступ с неверными кредами
+curl -X POST http://localhost:8080/api/transfers \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 15.00,
+       "bankId": "test-bank"
+     }' \
+      -i --user user:wrongpassword
+
+
+Доступ USER'ом к /api/transfers 
+curl -X POST http://localhost:8080/api/transfers \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 15.00,
+       "bankId": "100000002"
+     }' \
+      -i --user user:userpass
+
+Доступ USER'ом к /api/transfers/{id}/ (Получение статуса) - нереальный endpoint, служит для наших тестов только и понимания происходящего
+curl -X GET http://localhost:8080/api/transfers/3d5edb38-c016-4b60-8ae3-747aa9bea739 \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 15.00,
+       "bankId": "100000002"
+     }' \
+      -i --user user:userpass
+
+Доступ ADMIN'ом к /api/transfers/{id}/ (Получение статуса) - нереальный endpoint, служит для наших тестов только и понимания происходящего
+curl -X GET http://localhost:8080/api/transfers/3d5edb38-c016-4b60-8ae3-747aa9bea739 \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "recipientPhoneNumber": "9993334444",
+       "amount": 15.00,
+       "bankId": "100000002"
+     }' \
+      -i --user admin:adminpass
+
+Подтверждение перевода по коду
+curl -X POST http://localhost:8080/api/transfers/3d5edb38-c016-4b60-8ae3-747aa9bea739/confirm \
+     -H "Content-Type: application/json" \
+     -H "X-Phone-Number: 9991112222" \
+     -d '{
+       "confirmationCode": "207166"
+     }' \
+      -i --user user:userpass   
+
+
+brew install jq

@@ -12,8 +12,7 @@
 
     <artifactId>sbp-adapter-service</artifactId>
     <name>sbp-adapter-service</name>
-    <description>Adapter Service for SBP Lab 2</description>
-    <!-- Удалили <url/>, <licenses/>, <developers/>, <scm/>, <properties/> -->
+    <description>SBP Adapter Service Stub for SBP Lab 2</description>
 
     <dependencies>
         <dependency>
@@ -21,21 +20,25 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <!-- Lombok и starter-test наследуются -->
-         <dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-         <dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <!-- Зависимость для валидации (если нужна для DTO) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <!-- Конфигурации плагинов наследуются из родителя -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

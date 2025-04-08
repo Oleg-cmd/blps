@@ -1,4 +1,4 @@
-package ru.sberbank.sbp.lab2.account_service.dto;
+package ru.sberbank.sbp.lab2.notification_service.dto;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -10,11 +10,11 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class ReserveFundsCommand implements Serializable { // Должен быть Serializable
+public class SendSuccessNotificationCommand implements Serializable {
 
   private static final long serialVersionUID = 1L;
-
-  private String phoneNumber;
+  private String senderPhoneNumber;
   private BigDecimal amount;
-  private UUID correlationId; // ID перевода
+  private String recipientInfo;
+  private UUID correlationId;
 }

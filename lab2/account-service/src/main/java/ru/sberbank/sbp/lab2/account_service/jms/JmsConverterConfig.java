@@ -3,7 +3,6 @@ package ru.sberbank.sbp.lab2.account_service.jms;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.jms.ConnectionFactory;
-// Добавляем импорты для Map
 import java.util.HashMap;
 import java.util.Map;
 import org.springframework.boot.autoconfigure.jms.DefaultJmsListenerContainerFactoryConfigurer;
@@ -14,7 +13,8 @@ import org.springframework.jms.config.JmsListenerContainerFactory;
 import org.springframework.jms.support.converter.MappingJackson2MessageConverter;
 import org.springframework.jms.support.converter.MessageConverter;
 import org.springframework.jms.support.converter.MessageType;
-// Импортируем ЛОКАЛЬНЫЙ класс DTO
+import ru.sberbank.sbp.lab2.account_service.dto.CompleteTransferCommand;
+import ru.sberbank.sbp.lab2.account_service.dto.ReleaseFundsCommand;
 import ru.sberbank.sbp.lab2.account_service.dto.ReserveFundsCommand;
 
 @Configuration
@@ -37,21 +37,25 @@ public class JmsConverterConfig {
     converter.setTypeIdPropertyName("_type");
     converter.setObjectMapper(objectMapper);
 
-    // !!! Настройка маппинга Type ID на локальный класс !!!
     Map<String, Class<?>> typeIdMappings = new HashMap<>();
-    // Ключ: Полное имя класса, которое приходит в _type из transfer-service
-    // Значение: Локальный класс в account-service, в который нужно десериализовать
+    // Маппинг для ReserveFundsCommand
     typeIdMappings.put(
-      // Обрати внимание на имя пакета - он из transfer-service
       "ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReserveFundsCommand",
-      // Используем .class для получения локального класса
       ReserveFundsCommand.class
     );
-    // Если будут другие команды, добавь их маппинги сюда
-    // typeIdMappings.put("ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReleaseFundsCommand",
-    //                    ru.sberbank.sbp.lab2.account_service.dto.ReleaseFundsCommand.class);
+    // Маппинг для CompleteTransferCommand
+    typeIdMappings.put(
+      "ru.sberbank.sbp.lab2.transfer_service.dto.jms.CompleteTransferCommand",
+      CompleteTransferCommand.class
+    );
+    // Маппинг для ReleaseFundsCommand
+    typeIdMappings.put(
+      "ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReleaseFundsCommand",
+      ReleaseFundsCommand.class
+    );
 
-    // Устанавливаем настроенный маппинг в конвертер
+    // Добавить маппинги для других команд, если нужно
+
     converter.setTypeIdMappings(typeIdMappings);
 
     return converter;
@@ -61,13 +65,13 @@ public class JmsConverterConfig {
   public JmsListenerContainerFactory<?> jmsListenerContainerFactory(
     ConnectionFactory connectionFactory,
     DefaultJmsListenerContainerFactoryConfigurer configurer,
-    MessageConverter messageConverter, // Внедряем наш настроенный конвертер с маппингом
+    MessageConverter messageConverter,
     org.springframework.transaction.PlatformTransactionManager transactionManager
   ) {
     DefaultJmsListenerContainerFactory factory =
       new DefaultJmsListenerContainerFactory();
     configurer.configure(factory, connectionFactory);
-    factory.setMessageConverter(messageConverter); // Используем конвертер с маппингом
+    factory.setMessageConverter(messageConverter);
     factory.setTransactionManager(transactionManager);
     factory.setSessionTransacted(true);
     return factory;
