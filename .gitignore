@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VSCode
+.vscode/
+
+# Logs
+*.log
+logs/
+*.log.*
+*.out
+*.pid
+*.seed
+
+# System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+Icon?
+.Spotlight-V100
+.Trashes
+
+# Backup files
+*.bak
+*.tmp
+*.swp
+*.swo
+*~
+
+# Env files
+.env
+.env.*
+
