@@ -10,16 +10,12 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <!-- groupId и version наследуются от родителя, если они совпадают -->
-    <!-- Если groupId такой же, можно убрать -->
-    <!-- <groupId>ru.sberbank.sbp.lab2</groupId> -->
+  
     <artifactId>account-service</artifactId>
-    <!-- version можно оставить, если хочешь управлять версиями модулей отдельно,
-         но обычно SNAPSHOT для всех модулей в разработке нормально -->
     <version>0.0.1-SNAPSHOT</version>
     <name>account-service</name>
     <description>Account Service for SBP Lab 2</description>
-    <!-- Удалили <url/>, <licenses/>, <developers/>, <scm/>, <properties/> -->
+
 
     <dependencies>
         <dependency>
@@ -44,30 +40,23 @@
             <artifactId>postgresql</artifactId>
             <!-- <scope>runtime</scope> -->
         </dependency>
-        <!-- Lombok и spring-boot-starter-test наследуются из родительского POM -->
-        <!-- Поэтому их можно здесь не указывать, если scope не отличается -->
-        <!-- Но для ясности можно оставить -->
+       
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
+       
 
           <dependency>
            <groupId>com.atomikos</groupId>
            <artifactId>transactions-spring-boot3-starter</artifactId>
-            <!-- Версия управляется родителем -->
+           
         </dependency>
-        <!-- Добавляем Jakarta Transaction API -->
+        
         <dependency>
             <groupId>jakarta.transaction</groupId>
             <artifactId>jakarta.transaction-api</artifactId>
-             <!-- Версия управляется родителем -->
         </dependency>
      
 		    
@@ -75,17 +64,15 @@
 
     <build>
         <plugins>
-            <!-- Плагин компилятора наследует конфигурацию из родителя -->
+         
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <!-- Можно убрать <configuration>, если она полностью совпадает с родителем -->
             </plugin>
-            <!-- Плагин Spring Boot -->
+            
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <!-- Конфигурация exclusions наследуется -->
             </plugin>
         </plugins>
     </build>

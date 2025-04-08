@@ -10,5 +10,4 @@ public class ErrorResponse {
   String error;
   String message;
   String path;
-  // Можно добавить и другие поля по необходимости
 }

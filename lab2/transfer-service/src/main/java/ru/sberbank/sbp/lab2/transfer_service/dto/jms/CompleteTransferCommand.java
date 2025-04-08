@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CompleteTransferCommand implements AccountServiceCommand { // Реализуем общий интерфейс
+public class CompleteTransferCommand implements AccountServiceCommand {
 
   private static final long serialVersionUID = 1L;
 
@@ -19,9 +19,4 @@ public class CompleteTransferCommand implements AccountServiceCommand { // Ре�
   private String recipientPhoneNumber;
   private BigDecimal amount;
   private UUID correlationId; // ID оригинального перевода (Transfer.id)
-  // Геттер для correlationId уже есть из интерфейса AccountServiceCommand
-  // @Override
-  // public UUID getCorrelationId() {
-  //     return correlationId;
-  // }
 }

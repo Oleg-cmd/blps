@@ -1,6 +1,8 @@
 package ru.sberbank.sbp.lab2.sbp_adapter_service.service;
 
 import jakarta.annotation.PostConstruct;
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -12,23 +14,28 @@ import org.springframework.stereotype.Service;
 import ru.sberbank.sbp.lab2.sbp_adapter_service.dto.BankInfo;
 import ru.sberbank.sbp.lab2.sbp_adapter_service.dto.SbpTransferRequest;
 import ru.sberbank.sbp.lab2.sbp_adapter_service.dto.SbpTransferResponse;
+import ru.sberbank.sbp.lab2.sbp_adapter_service.exception.SbpBusinessException;
+import ru.sberbank.sbp.lab2.sbp_adapter_service.exception.SbpTechnicalException;
 
 @Service
 @Slf4j
 public class SbpAdapterLogic {
 
   private final Random random = ThreadLocalRandom.current();
-  // Простой реестр банков и их статус поддержки СБП (имитация)
   private final Map<String, BankInfo> bankRegistry = new ConcurrentHashMap<>();
-  // Простой реестр "привязки" номеров к банку по умолчанию (имитация)
-  private final Map<String, String> phoneToDefaultBankId =
+  private final Map<String, List<String>> phoneToBankIds =
     new ConcurrentHashMap<>();
 
-  // Инициализация заглушечных данных при старте сервиса
+  private static final BigDecimal BUSINESS_ERROR_AMOUNT = new BigDecimal(
+    "422.00"
+  );
+  private static final BigDecimal TECHNICAL_ERROR_AMOUNT = new BigDecimal(
+    "500.00"
+  );
+
   @PostConstruct
   void initializeMockData() {
     log.info("Initializing SBP Adapter Mock Data...");
-    // Добавляем несколько банков
     bankRegistry.put(
       "100000001",
       new BankInfo("100000001", "Alfa-Bank (Mock)", true)
@@ -48,21 +55,20 @@ public class SbpAdapterLogic {
     bankRegistry.put(
       "100000009",
       new BankInfo("100000009", "Closed Bank (Mock)", false)
-    ); // Банк не поддерживает СБП
+    );
 
-    // Привязываем некоторые номера к банкам
-    phoneToDefaultBankId.put("9993334444", "100000002"); // Получатель из нашего теста -> SberBank
-    phoneToDefaultBankId.put("9995556666", "100000004"); // -> Tinkoff
-    phoneToDefaultBankId.put("9997778888", "100000001"); // -> Alfa-Bank
-    phoneToDefaultBankId.put("9990000009", "100000009"); // -> Closed Bank
+    phoneToBankIds.put("9993334444", List.of("100000002", "100000001"));
+    phoneToBankIds.put("9995556666", List.of("100000004"));
+    phoneToBankIds.put("9997778888", List.of("100000003", "100000009"));
+    phoneToBankIds.put("9990000009", List.of("100000009"));
+
     log.info(
       "Mock Data Initialized. Banks: {}, Phones: {}",
       bankRegistry.size(),
-      phoneToDefaultBankId.size()
+      phoneToBankIds.size()
     );
   }
 
-  // Имитация поиска банка по номеру
   public Optional<BankInfo> findBank(String phoneNumber) {
     log.debug("SBP Adapter: Request to find bank for {}", phoneNumber);
     simulateNetworkDelay(50, 200);
@@ -72,51 +78,57 @@ public class SbpAdapterLogic {
       return Optional.empty();
     }
 
-    // Ищем банк по умолчанию для этого номера
-    String defaultBankId = phoneToDefaultBankId.get(phoneNumber);
-    if (defaultBankId == null) {
+    List<String> bankIdList = phoneToBankIds.get(phoneNumber);
+    if (bankIdList == null || bankIdList.isEmpty()) {
       log.warn(
-        "SBP Adapter: Phone number {} not registered for SBP default bank",
+        "SBP Adapter: Phone number {} not associated with any bank",
         phoneNumber
-      );
-      return Optional.empty(); // Номер не привязан
-    }
-
-    // Находим информацию о банке
-    BankInfo bankInfo = bankRegistry.get(defaultBankId);
-    if (bankInfo == null) {
-      // Странная ситуация: номер привязан к несуществующему банку
-      log.error(
-        "SBP Adapter: Inconsistency - phone {} linked to non-existent bankId {}",
-        phoneNumber,
-        defaultBankId
       );
       return Optional.empty();
     }
 
-    // Проверяем, поддерживает ли банк СБП
-    if (!bankInfo.isSupportsSbp()) {
-      log.warn(
-        "SBP Adapter: Bank {} for phone {} does not support SBP",
-        bankInfo.getBankName(),
-        phoneNumber
-      );
-      // Возвращаем информацию о банке, но с флагом false? Или empty?
-      // СБП обычно не возвращает неподдерживающие банки. Вернем empty.
-      return Optional.empty();
+    log.debug(
+      "SBP Adapter: Found associated bank IDs for {}: {}",
+      phoneNumber,
+      bankIdList
+    );
+
+    for (String bankId : bankIdList) {
+      BankInfo bankInfo = bankRegistry.get(bankId);
+      if (bankInfo == null) {
+        log.error(
+          "SBP Adapter: Inconsistency - phone {} linked to non-existent bankId {}",
+          phoneNumber,
+          bankId
+        );
+        continue;
+      }
+      if (bankInfo.isSupportsSbp()) {
+        log.info(
+          "SBP Adapter: Found suitable SBP-enabled bank {} ({}) for {}",
+          bankInfo.getBankName(),
+          bankInfo.getBankId(),
+          phoneNumber
+        );
+        return Optional.of(bankInfo);
+      } else {
+        log.debug(
+          "SBP Adapter: Bank {} for phone {} does not support SBP, checking next...",
+          bankInfo.getBankName(),
+          phoneNumber
+        );
+      }
     }
 
-    log.info(
-      "SBP Adapter: Found default bank {} ({}) for {}",
-      bankInfo.getBankName(),
-      bankInfo.getBankId(),
+    log.warn(
+      "SBP Adapter: No SBP-enabled bank found for phone {}",
       phoneNumber
     );
-    return Optional.of(bankInfo);
+    return Optional.empty();
   }
 
-  // Имитация обработки перевода (остается со случайными ошибками)
-  public SbpTransferResponse processTransfer(SbpTransferRequest request) {
+  public SbpTransferResponse processTransfer(SbpTransferRequest request)
+    throws SbpBusinessException, SbpTechnicalException {
     log.debug(
       "SBP Adapter: Request to process transfer {}",
       request.getCorrelationId()
@@ -125,13 +137,30 @@ public class SbpAdapterLogic {
 
     String sbpTxId =
       "SBP_TX_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+
+    if (BUSINESS_ERROR_AMOUNT.compareTo(request.getAmount()) == 0) {
+      String error = "Forced Business Error (e.g., Limit Exceeded)";
+      log.warn(
+        "SBP Adapter: Transfer {} processing declined (forced by amount). Reason: {}",
+        request.getCorrelationId(),
+        error
+      );
+      throw new SbpBusinessException(error);
+    }
+
+    if (TECHNICAL_ERROR_AMOUNT.compareTo(request.getAmount()) == 0) {
+      String error = "Forced Technical Error (e.g., SBP Unavailable)";
+      log.error(
+        "SBP Adapter: Transfer {} processing failed (forced by amount). Error: {}",
+        request.getCorrelationId(),
+        error
+      );
+      throw new SbpTechnicalException(error);
+    }
+
     int scenario = random.nextInt(100);
 
-    // Можно добавить зависимость от банка получателя из request, если он там будет
-    // String recipientBankId = bankRegistry.get(phoneToDefaultBankId.get(request.getRecipientPhoneNumber())).getBankId();
-    // if (recipientBankId.equals("ID_ПРОБЛЕМНОГО_БАНКА")) { scenario = 80; } // Увеличить шанс ошибки
-
-    if (scenario < 75) { // 75% шанс успеха
+    if (scenario < 90) {
       log.info(
         "SBP Adapter: Transfer {} processed successfully. SBP Tx ID: {}",
         request.getCorrelationId(),
@@ -141,43 +170,28 @@ public class SbpAdapterLogic {
         .success(true)
         .sbpTransactionId(sbpTxId)
         .build();
-    } else if (scenario < 85) { // 10% шанс - ошибка банка получателя
+    } else if (scenario < 95) {
       String error =
-        "Recipient bank unavailable (Error B" +
+        "Recipient bank unavailable (Random Error B" +
         (100 + random.nextInt(99)) +
         ")";
+
       log.error(
         "SBP Adapter: Transfer {} processing failed. Error: {}",
         request.getCorrelationId(),
         error
       );
-      return SbpTransferResponse.builder()
-        .success(false)
-        .errorMessage(error)
-        .build();
-    } else if (scenario < 95) { // 10% шанс - техническая ошибка СБП
+      throw new SbpBusinessException(error);
+    } else {
       String error =
-        "SBP technical error (Code S" + (500 + random.nextInt(99)) + ")";
+        "SBP technical error (Random Code S" + (500 + random.nextInt(99)) + ")";
+
       log.error(
         "SBP Adapter: Transfer {} processing failed. Error: {}",
         request.getCorrelationId(),
         error
       );
-      return SbpTransferResponse.builder()
-        .success(false)
-        .errorMessage(error)
-        .build();
-    } else { // 5% шанс - отказ по лимитам/правилам
-      String error = "Transfer declined by SBP rules (Limit exceeded or other)";
-      log.warn(
-        "SBP Adapter: Transfer {} processing declined. Reason: {}",
-        request.getCorrelationId(),
-        error
-      );
-      return SbpTransferResponse.builder()
-        .success(false)
-        .errorMessage(error)
-        .build();
+      throw new SbpTechnicalException(error);
     }
   }
 

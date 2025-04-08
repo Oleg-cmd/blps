@@ -7,7 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-// Импортируем DTO и сервисы из правильных пакетов
 import ru.sberbank.sbp.lab2.transfer_service.dto.*;
 import ru.sberbank.sbp.lab2.transfer_service.entity.Transfer;
 import ru.sberbank.sbp.lab2.transfer_service.service.TransferService;
@@ -18,14 +17,14 @@ import ru.sberbank.sbp.lab2.transfer_service.service.TransferService;
 @Slf4j
 public class TransferController {
 
-  private final TransferService transferService; // Зависимость от интерфейса сервиса
+  private final TransferService transferService;
 
   // --- Эндпоинт инициации перевода ---
   @PostMapping
   public ResponseEntity<TransferInitiationResponse> initiateTransfer(
-    @Valid @RequestBody InitiateTransferRequest request, // Валидация тела запроса
+    @Valid @RequestBody InitiateTransferRequest request,
     @RequestHeader("X-Phone-Number") String senderPhoneNumber
-  ) { // Получение номера из заголовка
+  ) {
     log.info(
       "Received transfer initiation request from {} for recipient {} amount {}",
       senderPhoneNumber,
@@ -37,8 +36,7 @@ public class TransferController {
     TransferInitiationResponse response = transferService.initiateTransfer(
       senderPhoneNumber,
       request.getRecipientPhoneNumber(),
-      request.getAmount(),
-      request.getBankId()
+      request.getAmount()
     );
 
     // Возвращаем ответ с ID перевода, статусом и кодом 201 Created
@@ -46,12 +44,12 @@ public class TransferController {
   }
 
   // --- Эндпоинт подтверждения перевода ---
-  @PostMapping("/{transferId}/confirm") // Путь с ID перевода
+  @PostMapping("/{transferId}/confirm")
   public ResponseEntity<TransferConfirmationResponse> confirmTransfer(
-    @PathVariable UUID transferId, // Получение ID из пути
-    @Valid @RequestBody ConfirmTransferRequest request, // Валидация тела запроса
+    @PathVariable UUID transferId,
+    @Valid @RequestBody ConfirmTransferRequest request,
     @RequestHeader("X-Phone-Number") String senderPhoneNumber
-  ) { // Номер отправителя (пока для логов)
+  ) {
     log.info(
       "Received confirmation request for transferId: {} with code: {} from: {}",
       transferId,
@@ -63,7 +61,6 @@ public class TransferController {
     TransferConfirmationResponse response = transferService.confirmTransfer(
       transferId,
       request.getConfirmationCode()
-      // Можно передать senderPhoneNumber, если сервис будет проверять владельца
     );
 
     // Возвращаем ответ со статусом и кодом 200 OK
@@ -71,12 +68,11 @@ public class TransferController {
   }
 
   // --- Эндпоинт получения статуса перевода ---
-  @GetMapping("/{transferId}") // Путь с ID перевода
+  @GetMapping("/{transferId}")
   public ResponseEntity<Transfer> getTransferStatus(
-    // Пока возвращаем всю сущность Transfer
     @PathVariable UUID transferId,
     @RequestHeader("X-Phone-Number") String senderPhoneNumber
-  ) { // Номер (пока для логов)
+  ) {
     log.info(
       "Received status request for transferId: {} from: {}",
       transferId,
@@ -87,8 +83,7 @@ public class TransferController {
     Transfer transfer = transferService.getTransferStatus(transferId);
 
     // Возвращаем найденный перевод и код 200 OK
-    // Если сервис не найдет перевод, он должен бросить исключение (например, TransferNotFoundException),
-    // которое будет обработано глобальным обработчиком исключений (создадим позже) и вернет 404.
+    // Если сервис не найдет перевод, он должен бросить исключение
     return ResponseEntity.ok(transfer);
   }
 }

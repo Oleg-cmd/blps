@@ -91,11 +91,9 @@ public class JmsSender {
   }
 
   // --- Методы для Notification Service ---
-
   public void sendConfirmationCodeCommand(SendConfirmationCodeCommand command) {
     // Отправка уведомлений может быть менее критичной,
     // поэтому можно не бросать RuntimeException при ошибке, а только логировать.
-    // Но для консистентности пока оставим throw.
     try {
       log.info(
         "Sending command to queue [{}]: CorrelationId: {}",

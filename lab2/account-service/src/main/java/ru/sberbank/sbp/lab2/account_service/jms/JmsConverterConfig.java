@@ -27,7 +27,7 @@ public class JmsConverterConfig {
     return mapper;
   }
 
-  @Bean // Конвертер для JSON
+  @Bean
   public MessageConverter jacksonJmsMessageConverter(
     ObjectMapper objectMapper
   ) {
@@ -53,8 +53,6 @@ public class JmsConverterConfig {
       "ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReleaseFundsCommand",
       ReleaseFundsCommand.class
     );
-
-    // Добавить маппинги для других команд, если нужно
 
     converter.setTypeIdMappings(typeIdMappings);
 

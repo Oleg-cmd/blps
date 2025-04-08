@@ -9,5 +9,5 @@ public class TransferConfirmationResponse {
 
   UUID transferId;
   TransferStatus status; // Финальный статус (SUCCESSFUL, FAILED, ...)
-  String message; // Сообщение об ошибке или успехе (опционально)
+  String message; // Сообщение об ошибке или успехе
 }

@@ -5,7 +5,7 @@ import lombok.NoArgsConstructor;
 
 // DTO для получения ответа от SBP Adapter
 @Data
-@NoArgsConstructor // Нужен для десериализации Jackson
+@NoArgsConstructor
 public class BankInfo {
 
   private String bankId;

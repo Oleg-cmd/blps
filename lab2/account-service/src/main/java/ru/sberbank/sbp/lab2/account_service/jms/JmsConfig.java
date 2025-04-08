@@ -20,5 +20,4 @@ public final class JmsConfig { // Используем final класс без �
     "notification.command.sendsuccess.queue";
   public static final String NOTIFICATION_SEND_FAILURE_QUEUE =
     "notification.command.sendfailure.queue";
-  // TODO: Добавить очереди для SBP Adapter, если нужно
 }

@@ -4,6 +4,7 @@ import jakarta.transaction.Transactional; // Используем jakarta @Trans
 import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -58,8 +59,7 @@ public class TransferServiceImpl implements TransferService {
   public TransferInitiationResponse initiateTransfer(
     String senderPhoneNumber,
     String recipientPhoneNumber,
-    BigDecimal amount,
-    String recipientBankId // Не используется, но оставлен для совместимости с интерфейсом
+    BigDecimal amount
   ) {
     log.info(
       "[TransferService] Initiating transfer from {} to {} amount {}",
@@ -86,12 +86,36 @@ public class TransferServiceImpl implements TransferService {
     }
 
     // 2. Проверка лимитов (заглушка)
-    BigDecimal currentDayAmount = BigDecimal.ZERO; // TODO: Implement limit check
-    if (currentDayAmount.add(amount).compareTo(DAILY_TRANSFER_LIMIT) > 0) {
-      throw new TransferLimitExceededException(
-        "Daily transfer limit exceeded."
+    LocalDateTime startOfDay = LocalDateTime.now().with(LocalTime.MIN);
+    BigDecimal currentDayAmount =
+      transferRepository.sumSuccessfulTransferAmountsByPhoneNumberAndDate(
+        senderPhoneNumber,
+        startOfDay
       );
+    log.info(
+      "[TransferService] Current successful transfers amount for {} today: {}",
+      senderPhoneNumber,
+      currentDayAmount
+    );
+
+    if (currentDayAmount.add(amount).compareTo(DAILY_TRANSFER_LIMIT) > 0) {
+      BigDecimal remainingLimit = DAILY_TRANSFER_LIMIT.subtract(
+        currentDayAmount
+      );
+      String message = String.format(
+        "Daily transfer limit exceeded. Current amount: %s, Requested: %s, Limit: %s, Remaining: %s",
+        currentDayAmount,
+        amount,
+        DAILY_TRANSFER_LIMIT,
+        remainingLimit.max(BigDecimal.ZERO) // Показываем 0, если уже превышен
+      );
+      log.warn("[TransferService] {}", message);
+      throw new TransferLimitExceededException(message); // Бросаем исключение
     }
+    log.info(
+      "[TransferService] Daily limit check passed for {}",
+      senderPhoneNumber
+    );
 
     // 3. Поиск банка получателя через SBP Adapter (REST вызов)
     Optional<BankInfo> bankInfoOpt = sbpSystemService.findRecipientBank(
@@ -211,8 +235,6 @@ public class TransferServiceImpl implements TransferService {
       );
     }
 
-    // TODO: Проверка времени жизни кода подтверждения
-
     // 2. Проверка кода
     if (!transfer.getConfirmationCode().equals(confirmationCode)) {
       log.warn(
@@ -246,16 +268,14 @@ public class TransferServiceImpl implements TransferService {
       );
     }
 
-    // 3. Код верный - продолжаем
-
-    // 4. Взаимодействие с SBP Adapter (REST вызов)
+    // 3. Взаимодействие с SBP Adapter (REST вызов)
     SbpTransferResponse sbpResponse = sbpSystemService.processTransferViaSbp(
       transfer
     );
 
     // Вся последующая логика (обновление БД + отправка JMS) должна быть атомарной
     if (sbpResponse.isSuccess()) {
-      // 5. Отправляем команду на завершение в account-service (JMS)
+      // 4. Отправляем команду на завершение в account-service (JMS)
       CompleteTransferCommand completeCmd = CompleteTransferCommand.builder()
         .senderPhoneNumber(transfer.getSenderPhoneNumber())
         .recipientPhoneNumber(transfer.getRecipientPhoneNumber())
@@ -281,7 +301,7 @@ public class TransferServiceImpl implements TransferService {
         );
       }
 
-      // 6. Обновляем статус перевода в локальной БД
+      // 5. Обновляем статус перевода в локальной БД
       transfer.setStatus(TransferStatus.SUCCESSFUL);
       transfer.setSbpTransactionId(sbpResponse.getSbpTransactionId()); // Сохраняем ID из SBP
       transfer.setCompletedAt(LocalDateTime.now());
@@ -293,7 +313,7 @@ public class TransferServiceImpl implements TransferService {
         transferId
       );
 
-      // 7. Отправляем команду уведомления об успехе (JMS Fire-and-forget)
+      // 6. Отправляем команду уведомления об успехе (JMS Fire-and-forget)
       sendSuccessNotificationCommand(transfer);
 
       return new TransferConfirmationResponse(
@@ -314,7 +334,7 @@ public class TransferServiceImpl implements TransferService {
       transfer.setStatus(TransferStatus.FAILED);
       transfer.setFailureReason(reason);
 
-      // 8. Отправляем команду на отмену резерва (JMS)
+      // 7. Отправляем команду на отмену резерва (JMS)
       sendReleaseFundsCommand(transfer, reason);
       transferRepository.save(transfer); // Будет в JTA транзакции
       log.info(
@@ -322,7 +342,7 @@ public class TransferServiceImpl implements TransferService {
         transferId
       );
 
-      // 9. Отправляем команду уведомления об ошибке (JMS Fire-and-forget)
+      // 8. Отправляем команду уведомления об ошибке (JMS Fire-and-forget)
       sendFailureNotificationCommand(transfer);
 
       return new TransferConfirmationResponse(
@@ -334,7 +354,7 @@ public class TransferServiceImpl implements TransferService {
   }
 
   @Override
-  @Transactional // Убери, если нет модификаций и строгая консистентность не нужна
+  @Transactional
   public Transfer getTransferStatus(UUID transferId) {
     log.debug("[TransferService] Getting status for transfer {}", transferId);
     return findTransferByIdOrFail(transferId);
@@ -382,8 +402,6 @@ public class TransferServiceImpl implements TransferService {
         e.getMessage(),
         e
       );
-      // Можно либо положиться на handleSendError в JmsSender, который бросает исключение,
-      // либо бросить его здесь для явности.
       throw new RuntimeException(
         "Failed to send ReleaseFundsCommand for transfer " + transfer.getId(),
         e

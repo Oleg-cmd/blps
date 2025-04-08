@@ -13,10 +13,10 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "accounts") // Явно укажем имя таблицы
-@Data // Lombok: генерирует геттеры, сеттеры, toString, equals, hashCode
-@NoArgsConstructor // Lombok: конструктор без аргументов
-@AllArgsConstructor // Lombok: конструктор со всеми аргументами
-@Builder // Lombok: Builder pattern
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Account {
 
   @Id
@@ -41,8 +41,7 @@ public class Account {
   @Version // Для оптимистичной блокировки
   private Long version;
 
-  // Инициализация полей по умолчанию в конструкторе без аргументов,
-  // если нужно (Lombok @Builder.Default можно использовать, но так проще)
+  // Инициализация полей по умолчанию в конструкторе без аргументов
   public Account(String phoneNumber) {
     this.phoneNumber = phoneNumber;
     this.balance = BigDecimal.ZERO;

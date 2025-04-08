@@ -1,7 +1,7 @@
 package ru.sberbank.sbp.lab2.transfer_service.service.stub;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service; // Используем @Service, чтобы Spring нашел этот бин
+import org.springframework.stereotype.Service;
 import ru.sberbank.sbp.lab2.transfer_service.service.PhoneValidationService;
 
 @Service

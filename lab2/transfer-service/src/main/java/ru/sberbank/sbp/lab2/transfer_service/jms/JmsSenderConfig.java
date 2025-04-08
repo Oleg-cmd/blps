@@ -14,10 +14,10 @@ import org.springframework.jms.support.converter.MessageType;
 @Configuration
 public class JmsSenderConfig {
 
-  @Bean // Конвертер для JSON (в transfer-service)
+  @Bean
   public MessageConverter jacksonJmsMessageConverter(
     ObjectMapper objectMapper
-  ) { // Тоже используем настроенный ObjectMapper
+  ) {
     MappingJackson2MessageConverter converter =
       new MappingJackson2MessageConverter();
     converter.setTargetType(MessageType.TEXT);
@@ -32,6 +32,4 @@ public class JmsSenderConfig {
     mapper.registerModule(new JavaTimeModule());
     return mapper;
   }
-  // JmsTemplate будет авто-сконфигурирован Spring Boot + Atomikos
-  // ... остальной код без изменений ...
 }

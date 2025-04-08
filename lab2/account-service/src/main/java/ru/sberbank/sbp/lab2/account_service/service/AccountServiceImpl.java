@@ -24,7 +24,7 @@ public class AccountServiceImpl implements AccountService {
 
   // Проверка баланса - операция чтения
   @Override
-  @Transactional // Указываем, что транзакция только для чтения
+  @Transactional
   public boolean hasEnoughBalance(String phoneNumber, BigDecimal amount) {
     log.debug("Checking balance for {} amount {}", phoneNumber, amount);
     Account account = getAccountByPhoneNumber(phoneNumber);

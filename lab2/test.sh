@@ -1,265 +1,387 @@
 #!/bin/bash
 
+# set -x
 
 echo "======================================"
-echo " SBP Lab 2 - Full Test Script        "
+echo " SBP Lab 2 - Полный тестовый скрипт  "
 echo "======================================"
-echo "Timestamp: $(date)"
+echo "Временная метка: $(date)"
 echo "======================================"
 
 
-# --- Configuration ---
+# --- Конфигурация ---
 BASE_URL="http://localhost:8080" # URL transfer-service
-SBP_ADAPTER_URL="http://localhost:8083" # URL sbp-adapter-service (предполагаемый порт)
-NOTIFICATION_URL="http://localhost:8084" # URL notification-service (предполагаемый порт)
-ACCOUNT_URL="http://localhost:8081" # URL account-service (предполагаемый порт)
+# SBP_ADAPTER_URL="http://localhost:8083" # URL sbp-adapter-service (не используется напрямую скриптом)
+# NOTIFICATION_URL="http://localhost:8084" # URL notification-service (не используется напрямую скриптом)
+# ACCOUNT_URL="http://localhost:8081" # URL account-service (не используется напрямую скриптом)
 
+# --- Отправитель ---
 SENDER_PHONE="9991112222"
-RECIPIENT_PHONE="9993334444" # Привязан к SberBank (Mock) 100000002
-RECIPIENT_BANK_ID="100000002" # Ожидаемый ID для SberBank (Mock)
 
+# --- Получатели (На основе мок-данных SbpAdapterLogic) ---
+# Получатель 1: Есть Сбер (Работает) и Альфа (Работает) - Целимся в Сбер
+RECIPIENT_PHONE_SBER="9993334444"
+RECIPIENT_BANK_ID_SBER="100000002" # SberBank (Mock)
+
+# Получатель 2: Есть Тинькофф (Работает)
+RECIPIENT_PHONE_TINKOFF="9995556666"
+RECIPIENT_BANK_ID_TINKOFF="100000004" # Tinkoff (Mock)
+
+# Получатель 3: Есть ВТБ (Работает) и Закрытый Банк (Не работает) - Целимся в ВТБ
+RECIPIENT_PHONE_VTB="9997778888"
+RECIPIENT_BANK_ID_VTB="100000003" # VTB (Mock)
+
+# Получатель 4: Есть ТОЛЬКО Закрытый Банк (Не работает)
+RECIPIENT_PHONE_CLOSED="9990000009"
+RECIPIENT_BANK_ID_CLOSED="100000009" # Закрытый Банк (Mock) - Не поддерживает СБП
+
+
+# --- Учетные данные ---
 USER_CREDS="user:userpass"
 ADMIN_CREDS="admin:adminpass"
 INVALID_CREDS="user:wrongpassword"
-RUN_COUNT=10 # Уменьшим до 1 для отладки, потом можно увеличить
 
-# --- Function to check if jq is installed ---
+# --- Суммы ---
+SUCCESS_AMOUNT="100.50"
+BUSINESS_ERROR_AMOUNT="422.00" # Для имитации SbpBusinessException
+TECHNICAL_ERROR_AMOUNT="500.00" # Для имитации SbpTechnicalException
+INVALID_CODE_AMOUNT="111.00" # Для тестов с неверным кодом
+SMALL_AMOUNT="50.25"         # Другая небольшая сумма для разнообразия
+LIMIT_TEST_AMOUNT_1="140000.00" # Для теста превышения лимита (часть 1)
+LIMIT_TEST_AMOUNT_2="15000.00"  # Для теста превышения лимита (часть 2)
+
+
+# --- Прочие настройки ---
+MAX_CONFIRMATION_ATTEMPTS=3
+
+# --- Функции ---
 check_jq() {
   if ! command -v jq &> /dev/null; then
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    echo "!! Error: 'jq' command not found.                         !!"
-    echo "!! Please install jq to parse JSON responses.             !!"
-    echo "!! macOS: brew install jq                                 !!"
-    echo "!! Debian/Ubuntu: sudo apt-get install jq                 !!"
-    echo "!! CentOS/Fedora: sudo yum/dnf install jq                 !!"
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+    echo "!! Ошибка: команда 'jq' не найдена.                       !!" >&2
+    echo "!! Пожалуйста, установите jq.                             !!" >&2
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
     exit 1
   fi
-  echo "[Info] jq found."
+  echo "[Инфо] jq найден."
 }
 
-# --- Function to extract confirmation code using GET /transfers/{id} as admin ---
 get_confirmation_code_via_api() {
   local transfer_id=$1
   local code=""
+  local local_rc=0 # Локальный код возврата
 
-  # Выводим информационные сообщения в stderr (>_2)
-  echo "[Info] Attempting to get confirmation code for $transfer_id via API (as admin)..." >&2
+  echo "[Инфо] Попытка получить код подтверждения для $transfer_id через API (админ)..." >&2
   local output_file
   output_file=$(mktemp)
   local http_status
   http_status=$(curl -X GET "$BASE_URL/api/transfers/$transfer_id" \
            -u "$ADMIN_CREDS" \
            -H "X-Phone-Number: $SENDER_PHONE" \
+           --connect-timeout 5 --max-time 10 \
            --silent --show-error --include --output "$output_file" --write-out "%{http_code}")
 
    local body
    body=$(awk 'BEGIN{found=0} /^(\r)?$/{found=1; next} found{print}' "$output_file")
 
-  # Отладочный вывод тела в stderr
-  echo "[Debug] Get Status Response Body for $transfer_id: $body" >&2
+  echo "[Отладка] Тело ответа Get Status для $transfer_id: $body" >&2
 
   if [ "$http_status" -eq 200 ]; then
       code=$(echo "$body" | jq -r '.confirmationCode // empty')
       if [ -z "$code" ] || [ "$code" == "null" ]; then
-          # Выводим ошибку в stderr
-          echo -e "\033[0;31mError: Could not extract confirmationCode from API response for $transfer_id! Body: $body\033[0m" >&2
-          rm "$output_file"
-          return 1 # Indicate failure
+          echo -e "\033[0;31mОшибка: Не удалось извлечь confirmationCode из ответа API для $transfer_id! Тело: $body\033[0m" >&2
+          local_rc=1
       else
-           # Выводим информационное сообщение в stderr
-          echo "[Info] Successfully extracted confirmation code: $code" >&2
-          rm "$output_file"
-          echo "$code"
-          return 0 # Indicate success
+          echo "[Инфо] Код подтверждения успешно извлечен: $code" >&2
+          code=$(echo "$code" | tr -d '\r') # Убираем возможные символы возврата каретки
+          echo "$code" # Выводим очищенный код
       fi
   else
-      # Выводим ошибку в stderr
-      echo -e "\033[0;31mError: Failed to get transfer status for $transfer_id (Status: $http_status). Cannot get confirmation code.\033[0m" >&2
-      echo "------- RAW GET STATUS OUTPUT -------" >&2
+      echo -e "\033[0;31mОшибка: Не удалось получить статус перевода для $transfer_id (Статус: $http_status). Невозможно получить код подтверждения.\033[0m" >&2
+      echo "------- RAW GET STATUS OUTPUT (Admin) -------" >&2
       cat "$output_file" >&2
-      echo "------------------------------------" >&2
-      rm "$output_file"
-      return 1 # Indicate failure
+      echo "------------------------------------------" >&2
+      local_rc=1
   fi
+  rm "$output_file" &> /dev/null
+  return $local_rc
 }
 
-
-
-# --- Helper function to print test result ---
 print_result() {
     local test_name=$1
     local http_status=$2
     local expected_status=$3
     local response_body=$4
+    local result_status=1 # Предполагаем FAIL
 
-    # Очищаем статус от возможных нечисловых символов (на всякий случай)
     http_status_cleaned=$(echo "$http_status" | tr -cd '0-9')
 
-    echo -n "$test_name - Expected: $expected_status, Got: $http_status_cleaned -> "
-    if [[ "$http_status_cleaned" -eq "$expected_status" ]]; then
+    echo -n "$test_name - Ожидаемый: $expected_status, Получен: $http_status_cleaned -> "
+    if [[ "$http_status_cleaned" == "$expected_status" ]]; then
         echo -e "\033[0;32mPASS\033[0m"
-        # Возвращаем 0 при успехе
-        return 0
+        result_status=0 # PASS
     else
         echo -e "\033[0;31mFAIL\033[0m"
-        # Возвращаем 1 при ошибке
-        return 1
+        result_status=1 # FAIL
     fi
+
+    # Всегда выводим тело ответа, если оно не пустое
     if [ ! -z "$response_body" ]; then
-      # Обрезаем длинные ответы для читаемости
-      if [ ${#response_body} -gt 200 ]; then
-        response_body="${response_body:0:200}..."
-      fi
-      echo "       Response Body: $response_body"
+      local body_to_print="$response_body"
+      body_to_print=$(echo "$body_to_print" | tr -d '\n\r')
+      echo "       Тело ответа: $body_to_print"
     fi
-    sleep 0.5
+
+    sleep 0.2
+    return $result_status
 }
 
-# --- Main Script ---
+# --- Функция для запуска полного цикла перевода ---
+# $1: run_index (Индекс запуска)
+# $2: recipient_phone (Телефон получателя)
+# $3: recipient_bank_id (ID банка получателя)
+# $4: amount (Сумма)
+# $5: confirmation_code_mode (Режим кода: CORRECT, INVALID, INVALID_MAX)
+# $6: expected_confirm_http_status (Ожидаемый HTTP статус подтверждения)
+# $7: expected_final_transfer_status (Ожидаемый финальный статус перевода)
+# $8: test_prefix (Префикс теста)
+run_transfer_flow() {
+    local run_index=$1
+    local recipient_phone=$2
+    local recipient_bank_id=$3
+    local amount=$4
+    local confirmation_code_mode=$5
+    local expected_confirm_http_status=$6
+    local expected_final_transfer_status=$7
+    local test_prefix=$8
 
+    echo ""
+    echo "--- ЗАПУСК ЦИКЛА ${test_prefix} ($run_index) Получатель: $recipient_phone, Банк: $recipient_bank_id, Сумма: $amount ---"
+    local TRANSFER_ID=""
+    local ACTUAL_CONFIRMATION_CODE=""
+    local CODE_TO_SEND=""
+    local RUN_FAILED=0
+
+    # 1. Инициация перевода (USER)
+    echo "[Тест ${test_prefix}-Init.$run_index] Инициация перевода (Пользователь)"
+    INITIATE_OUTPUT_FILE=$(mktemp)
+    INITIATE_STATUS=$(curl -X POST "$BASE_URL/api/transfers" \
+         -u "$USER_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" \
+         -d '{"recipientPhoneNumber": "'$recipient_phone'","amount": '$amount',"bankId": "'$recipient_bank_id'"}' \
+         --connect-timeout 5 --max-time 15 \
+         --silent --show-error -o "$INITIATE_OUTPUT_FILE" --write-out "%{http_code}")
+    INITIATE_BODY=$(cat "$INITIATE_OUTPUT_FILE"); rm "$INITIATE_OUTPUT_FILE" &> /dev/null
+    if ! print_result "[Тест ${test_prefix}-Init.$run_index]" "$INITIATE_STATUS" 201 "$INITIATE_BODY"; then RUN_FAILED=1; fi
+
+    if [ "$RUN_FAILED" -eq 0 ]; then
+        TRANSFER_ID=$(echo "$INITIATE_BODY" | jq -r '.transferId // empty')
+        if [ -z "$TRANSFER_ID" ] || [ "$TRANSFER_ID" == "null" ]; then echo -e "\033[0;31mОшибка: Не удалось извлечь transferId!\033[0m"; RUN_FAILED=1; else echo "       Получен Transfer ID: $TRANSFER_ID"; fi
+    else echo -e "\033[0;31mОшибка: Инициация перевода не удалась.\033[0m"; fi
+
+    # 2. Получение статуса (USER) - Проверка безопасности
+    if [ "$RUN_FAILED" -eq 0 ]; then
+        echo "[Тест ${test_prefix}-GetStatusUser.$run_index] Получение статуса $TRANSFER_ID (Пользователь)"
+        STATUS_4=$(curl -X GET "$BASE_URL/api/transfers/$TRANSFER_ID" -u "$USER_CREDS" -H "X-Phone-Number: $SENDER_PHONE" --connect-timeout 5 --max-time 10 --silent --output /dev/null --write-out "%{http_code}")
+        if ! print_result "[Тест ${test_prefix}-GetStatusUser.$run_index]" "$STATUS_4" 403; then RUN_FAILED=1; fi
+    fi
+
+    # 3. Получение кода (ADMIN)
+    if [ "$RUN_FAILED" -eq 0 ]; then
+        echo "[Тест ${test_prefix}-GetCode.$run_index] Получение статуса $TRANSFER_ID (Админ) для извлечения кода"
+        ACTUAL_CONFIRMATION_CODE=$(get_confirmation_code_via_api "$TRANSFER_ID")
+        GET_CODE_RC=$?
+        if [ $GET_CODE_RC -ne 0 ] || [ -z "$ACTUAL_CONFIRMATION_CODE" ]; then
+           echo -e "\033[0;31mОшибка: Не удалось получить код подтверждения! Пропуск теста подтверждения.\033[0m"
+           RUN_FAILED=1
+        else
+           echo "       Реальный код подтверждения: [$ACTUAL_CONFIRMATION_CODE]"
+           if [[ "$confirmation_code_mode" == "CORRECT" ]]; then CODE_TO_SEND="$ACTUAL_CONFIRMATION_CODE";
+           elif [[ "$confirmation_code_mode" == "INVALID" || "$confirmation_code_mode" == "INVALID_MAX" ]]; then CODE_TO_SEND="000000"; if [[ "$CODE_TO_SEND" == "$ACTUAL_CONFIRMATION_CODE" ]]; then CODE_TO_SEND="111111"; fi
+           else echo -e "\033[0;31mОшибка: Неизвестный режим '$confirmation_code_mode'!\033[0m"; RUN_FAILED=1; CODE_TO_SEND=""; fi
+           if [[ "$RUN_FAILED" -eq 0 ]]; then echo "       Код для отправки в тесте: [$CODE_TO_SEND]"; fi
+        fi
+    fi
+
+    # 4. Подтверждение (USER)
+    if [ "$RUN_FAILED" -eq 0 ] && [ ! -z "$CODE_TO_SEND" ] ; then
+        if [[ "$confirmation_code_mode" == "INVALID_MAX" ]]; then
+            echo "[Тест ${test_prefix}-Confirm.$run_index] Подтверждение перевода $TRANSFER_ID (Пользователь) - Отправка НЕВЕРНОГО кода $MAX_CONFIRMATION_ATTEMPTS раз"
+            local attempt confirm_output_file_inv json_data_inv confirm_status_inv confirm_body_inv expected_status_inv expected_message actual_message
+            for attempt in $(seq 1 $MAX_CONFIRMATION_ATTEMPTS); do
+                 confirm_output_file_inv=$(mktemp)
+                 json_data_inv="{\"confirmationCode\": \"$CODE_TO_SEND\"}"
+                 echo "       Отладка: Неверная попытка $attempt/$MAX_CONFIRMATION_ATTEMPTS JSON: ->$json_data_inv<-" >&2
+                 confirm_status_inv=$(curl -X POST "$BASE_URL/api/transfers/$TRANSFER_ID/confirm" -u "$USER_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" -d "$json_data_inv" --connect-timeout 5 --max-time 15 --silent --show-error -o "$confirm_output_file_inv" --write-out "%{http_code}")
+                 confirm_body_inv=$(cat "$confirm_output_file_inv"); rm "$confirm_output_file_inv" &> /dev/null
+                 expected_status_inv=200
+                 if ! print_result "[Тест ${test_prefix}-Confirm-Attempt$attempt.$run_index]" "$confirm_status_inv" "$expected_status_inv" "$confirm_body_inv"; then RUN_FAILED=1; break; fi
+                 if [[ $attempt -lt $MAX_CONFIRMATION_ATTEMPTS ]]; then expected_message="Invalid confirmation code. Attempts left: $(($MAX_CONFIRMATION_ATTEMPTS - attempt))"; else expected_message="Invalid confirmation code. Max attempts exceeded."; fi
+                 actual_message=$(echo "$confirm_body_inv" | jq -r '.message // ""')
+                 echo -n "       Проверка сообщения ответа: Ожидается '$expected_message', Получено '$actual_message' -> "
+                 if [[ "$actual_message" == "$expected_message" ]]; then echo -e "\033[0;32mPASS\033[0m"; else echo -e "\033[0;31mFAIL\033[0m"; RUN_FAILED=1; break; fi
+                 sleep 1
+            done
+            expected_confirm_http_status=200 # Общий ожидаемый статус для шага (последний запрос)
+        else
+            echo "[Тест ${test_prefix}-Confirm.$run_index] Подтверждение перевода $TRANSFER_ID (Пользователь)"
+            CONFIRM_OUTPUT_FILE=$(mktemp)
+            JSON_DATA="{\"confirmationCode\": \"$CODE_TO_SEND\"}"
+            echo "       Отладка: JSON данные для запроса подтверждения: ->$JSON_DATA<-" >&2
+            CONFIRM_STATUS=$(curl -X POST "$BASE_URL/api/transfers/$TRANSFER_ID/confirm" -u "$USER_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" -d "$JSON_DATA" --connect-timeout 5 --max-time 15 --silent --show-error -o "$CONFIRM_OUTPUT_FILE" --write-out "%{http_code}")
+            CONFIRM_BODY=$(cat "$CONFIRM_OUTPUT_FILE"); rm "$CONFIRM_OUTPUT_FILE" &> /dev/null
+            if ! print_result "[Тест ${test_prefix}-Confirm.$run_index]" "$CONFIRM_STATUS" "$expected_confirm_http_status" "$CONFIRM_BODY"; then RUN_FAILED=1; fi
+            if [[ "$CONFIRM_STATUS" =~ ^5[0-9]{2}$ ]] || [[ "$CONFIRM_STATUS" == "000" ]]; then echo "       Тело ошибки: $CONFIRM_BODY"; fi
+        fi
+    fi
+
+    # 5. Финальная проверка статуса (ADMIN)
+    if [ ! -z "$TRANSFER_ID" ]; then
+        echo "[Тест ${test_prefix}-FinalStatus.$run_index] Получение финального статуса $TRANSFER_ID (Админ)"
+        sleep 1 # Небольшая пауза перед проверкой финального статуса
+        FINAL_OUTPUT_FILE=$(mktemp)
+        FINAL_STATUS_CODE=$(curl -X GET "$BASE_URL/api/transfers/$TRANSFER_ID" \
+             -u "$ADMIN_CREDS" -H "X-Phone-Number: $SENDER_PHONE" \
+             --connect-timeout 5 --max-time 10 \
+             --silent --show-error -o "$FINAL_OUTPUT_FILE" --write-out "%{http_code}")
+        FINAL_BODY=$(cat "$FINAL_OUTPUT_FILE"); rm "$FINAL_OUTPUT_FILE" &> /dev/null
+        print_result "[Тест ${test_prefix}-FinalStatus.$run_index]" "$FINAL_STATUS_CODE" 200 "$FINAL_BODY"
+
+        if [ "$FINAL_STATUS_CODE" -eq 200 ]; then
+            actual_final_status=$(echo "$FINAL_BODY" | jq -r '.status // "UNKNOWN"')
+            echo -n "       Проверка финального статуса перевода: Ожидается '$expected_final_transfer_status', Получено '$actual_final_status' -> "
+            if [ "$actual_final_status" == "$expected_final_transfer_status" ]; then echo -e "\033[0;32mPASS\033[0m"; else echo -e "\033[0;31mFAIL\033[0m"; RUN_FAILED=1; fi
+        else
+             RUN_FAILED=1
+        fi
+    else
+        echo "Пропуск финальной проверки статуса, так как TRANSFER_ID отсутствует."
+        RUN_FAILED=1
+    fi
+
+
+    if [ "$RUN_FAILED" -ne 0 ]; then
+      FAILED_RUNS=$((FAILED_RUNS + 1))
+      echo -e "\033[0;31m--- ЗАПУСК ЦИКЛА ${test_prefix} ($run_index) ЗАВЕРШИЛСЯ С ОШИБКОЙ ---\033[0m"
+      return 1
+    else
+      echo -e "\033[0;32m--- ЗАПУСК ЦИКЛА ${test_prefix} ($run_index) ПРОШЕЛ УСПЕШНО ---\033[0m"
+      return 0
+    fi
+}
+
+
+# --- Основное выполнение скрипта ---
 check_jq
 
-# --- Initial Security Checks (Run Once) ---
+# --- Начальные проверки безопасности ---
 echo ""
-echo "--- Running Initial Security Checks ---"
+echo "--- Запуск начальных проверок безопасности ---"
+echo "[Тест Sec-1.0] Инициация перевода (Неавторизован)"
+STATUS_1=$(curl -X POST "$BASE_URL/api/transfers" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE_SBER'","amount": 1.00,"bankId": "sec-check-1"}' --connect-timeout 5 --max-time 10 --silent --output /dev/null --write-out "%{http_code}")
+print_result "[Тест Sec-1.0]" "$STATUS_1" 401 ""
+echo "[Тест Sec-2.0] Инициация перевода (Неверные учетные данные)"
+STATUS_2=$(curl -X POST "$BASE_URL/api/transfers" -u "$INVALID_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE_SBER'","amount": 2.00,"bankId": "sec-check-2"}' --connect-timeout 5 --max-time 10 --silent --output /dev/null --write-out "%{http_code}")
+print_result "[Тест Sec-2.0]" "$STATUS_2" 401 ""
 
-# Тест 1: Доступ без аутентификации
-echo "[Test 1.0] Initiate Transfer (Unauthorized)"
-STATUS_1=$(curl -X POST "$BASE_URL/api/transfers" \
-     -H "Content-Type: application/json" \
-     -H "X-Phone-Number: $SENDER_PHONE" \
-     -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE'","amount": 1.00,"bankId": "sec-check-1"}' \
-     --silent --output /dev/null --write-out "%{http_code}")
-print_result "[Test 1.0]" "$STATUS_1" 401
-
-# Тест 2: Доступ с неверными кредами
-echo "[Test 2.0] Initiate Transfer (Invalid Credentials)"
-STATUS_2=$(curl -X POST "$BASE_URL/api/transfers" \
-     -u "$INVALID_CREDS" \
-     -H "Content-Type: application/json" \
-     -H "X-Phone-Number: $SENDER_PHONE" \
-     -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE'","amount": 2.00,"bankId": "sec-check-2"}' \
-     --silent --output /dev/null --write-out "%{http_code}")
-print_result "[Test 2.0]" "$STATUS_2" 401
-
-
-# --- Full Transfer Flow Loop ---
+# --- Запуск сценариев ---
 echo ""
-echo "--- Running Full Transfer Flow ($RUN_COUNT times) ---"
-
+echo "--- Запуск основных сценариев ---"
 FAILED_RUNS=0
-for (( i=1; i<=RUN_COUNT; i++ )); do
-  echo ""
-  echo "--- FLOW RUN $i / $RUN_COUNT ---"
-  TRANSFER_ID=""
-  CONFIRMATION_CODE=""
-  RUN_FAILED=0
 
-  # 1. Инициация перевода (USER)
-  echo "[Test 3.$i] Initiate Transfer (User)"
-  INITIATE_OUTPUT_FILE=$(mktemp)
-  INITIATE_STATUS=$(curl -X POST "$BASE_URL/api/transfers" \
-       -u "$USER_CREDS" \
-       -H "Content-Type: application/json" \
-       -H "X-Phone-Number: $SENDER_PHONE" \
-       -d '{
-         "recipientPhoneNumber": "'$RECIPIENT_PHONE'",
-         "amount": '1$i'.50,
-         "bankId": "'$RECIPIENT_BANK_ID'"
-       }' \
-       --silent --show-error -o "$INITIATE_OUTPUT_FILE" --write-out "%{http_code}")
-  INITIATE_BODY=$(cat "$INITIATE_OUTPUT_FILE")
-  rm "$INITIATE_OUTPUT_FILE"
+# Сценарий 1: Успешный перевод (Получатель SBER)
+run_transfer_flow 1 "$RECIPIENT_PHONE_SBER" "$RECIPIENT_BANK_ID_SBER" "$SUCCESS_AMOUNT" "CORRECT" 200 "SUCCESSFUL" "SuccessSber"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
-  print_result "[Test 3.$i]" "$INITIATE_STATUS" 201 "$INITIATE_BODY"
-  if [[ $? -ne 0 ]]; then RUN_FAILED=1; fi # Проверяем результат print_result
+# Сценарий 2: Ошибка бизнес-логики SBP (Получатель TINKOFF)
+run_transfer_flow 2 "$RECIPIENT_PHONE_TINKOFF" "$RECIPIENT_BANK_ID_TINKOFF" "$BUSINESS_ERROR_AMOUNT" "CORRECT" 200 "FAILED" "BizErrTinkoff"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
-  # Извлекаем ID, если статус успешный
-  if [ "$RUN_FAILED" -eq 0 ]; then
-      TRANSFER_ID=$(echo "$INITIATE_BODY" | jq -r '.transferId // empty')
-      if [ -z "$TRANSFER_ID" ] || [ "$TRANSFER_ID" == "null" ]; then
-          echo -e "\033[0;31mError: Could not extract transferId from response in run $i!\033[0m"
-          RUN_FAILED=1
-      else
-           echo "       Captured Transfer ID: $TRANSFER_ID"
-      fi
-  else
-      echo -e "\033[0;31mError: Transfer initiation failed in run $i, skipping dependent tests.\033[0m"
-  fi
+# Сценарий 3: Техническая ошибка SBP (Получатель VTB)
+run_transfer_flow 3 "$RECIPIENT_PHONE_VTB" "$RECIPIENT_BANK_ID_VTB" "$TECHNICAL_ERROR_AMOUNT" "CORRECT" 200 "FAILED" "TechErrVtb"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
-  # Выполняем следующие тесты только если предыдущие шаги успешны
-  if [ "$RUN_FAILED" -eq 0 ]; then
+# Сценарий 4: Неверный код подтверждения (1 раз) (Получатель SBER)
+run_transfer_flow 4 "$RECIPIENT_PHONE_SBER" "$RECIPIENT_BANK_ID_SBER" "$INVALID_CODE_AMOUNT" "INVALID" 200 "AWAITING_CONFIRMATION" "InvCodeSber"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
-      # 2. Получение статуса (USER) - Ожидаем 403
-      echo "[Test 4.$i] Get Status $TRANSFER_ID (User)"
-      STATUS_4=$(curl -X GET "$BASE_URL/api/transfers/$TRANSFER_ID" \
-           -u "$USER_CREDS" \
-           -H "X-Phone-Number: $SENDER_PHONE" \
-           --silent --output /dev/null --write-out "%{http_code}")
-      print_result "[Test 4.$i]" "$STATUS_4" 403
-      if [[ $? -ne 0 ]]; then RUN_FAILED=1; fi
+# Сценарий 5: Неверный код подтверждения (максимум попыток) (Получатель TINKOFF)
+run_transfer_flow 5 "$RECIPIENT_PHONE_TINKOFF" "$RECIPIENT_BANK_ID_TINKOFF" "$INVALID_CODE_AMOUNT" "INVALID_MAX" 200 "FAILED" "InvCodeMaxTinkoff"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
-  fi # End check RUN_FAILED before Get Status Admin
-
-  if [ "$RUN_FAILED" -eq 0 ]; then
-      # 3. Получение статуса (ADMIN) - Используем для получения кода
-      echo "[Test 5.$i] Get Status $TRANSFER_ID (Admin)"
-      CONFIRMATION_CODE=$(get_confirmation_code_via_api "$TRANSFER_ID")
-      GET_CODE_RC=$? # Получаем код возврата функции
-
-      # Проверяем и код возврата, и что переменная не пустая
-      if [ $GET_CODE_RC -ne 0 ] || [ -z "$CONFIRMATION_CODE" ]; then
-         echo -e "\033[0;31mError: Could not get confirmation code for $TRANSFER_ID in run $i! Skipping confirmation.\033[0m"
-         RUN_FAILED=1
-      else
-        echo "       Using Confirmation Code: [$CONFIRMATION_CODE]"
-      fi
-  fi # End check RUN_FAILED before Confirmation
-
-  if [ "$RUN_FAILED" -eq 0 ]; then
-        # 4. Подтверждение перевода (USER)
-        echo "[Test 6.$i] Confirm Transfer $TRANSFER_ID (User)"
-        CONFIRM_OUTPUT_FILE=$(mktemp)
-        JSON_DATA="{\"confirmationCode\": \"$CONFIRMATION_CODE\"}"
-        echo "       DEBUG: JSON data for confirm request: ->$JSON_DATA<-"
-        CONFIRM_STATUS=$(curl -X POST "$BASE_URL/api/transfers/$TRANSFER_ID/confirm" \
-             -u "$USER_CREDS" \
-             -H "Content-Type: application/json" \
-             -H "X-Phone-Number: $SENDER_PHONE" \
-             -d "$JSON_DATA" \
-             --silent --show-error -o "$CONFIRM_OUTPUT_FILE" --write-out "%{http_code}")
-        CONFIRM_BODY=$(cat "$CONFIRM_OUTPUT_FILE")
-        rm "$CONFIRM_OUTPUT_FILE"
-
-        print_result "[Test 6.$i]" "$CONFIRM_STATUS" 200 "$CONFIRM_BODY"
-        if [[ $? -ne 0 ]]; then
-          RUN_FAILED=1
-           # Опционально: вывести тело при ошибке 500
-           if [[ "$CONFIRM_STATUS" =~ ^5[0-9]{2}$ ]]; then # Check if status is 5xx
-                echo "       Error Body: $CONFIRM_BODY"
-           fi
-        fi
-  fi # End check RUN_FAILED before ending loop iteration
-
-  if [ "$RUN_FAILED" -ne 0 ]; then
-    FAILED_RUNS=$((FAILED_RUNS + 1))
-    echo -e "\033[0;31m--- FLOW RUN $i FAILED ---\033[0m"
-  else
-    echo -e "\033[0;32m--- FLOW RUN $i PASSED ---\033[0m"
-  fi
-
-done # End of loop
+# Сценарий 6: Успешный перевод другому получателю (VTB)
+run_transfer_flow 6 "$RECIPIENT_PHONE_VTB" "$RECIPIENT_BANK_ID_VTB" "$SMALL_AMOUNT" "CORRECT" 200 "SUCCESSFUL" "SuccessVtb"
+if [[ $? -ne 0 ]]; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
 
 
-
+# --- Сценарий 7: Превышение дневного лимита ---
 echo ""
-echo "====================="
-echo " Test Script Finished "
-if [ $FAILED_RUNS -gt 0 ]; then
-  echo -e "\033[0;31m $FAILED_RUNS run(s) failed.\033[0m"
-  exit 1
+echo "--- ЗАПУСК ЦИКЛА LimitExceed (7) ---"
+# Используем получателя SBER для теста лимита
+echo "[Тест LimitExceed-Setup.7] Выполнение первого крупного перевода (Получатель: $RECIPIENT_PHONE_SBER, Сумма: $LIMIT_TEST_AMOUNT_1)..."
+run_transfer_flow 7 "$RECIPIENT_PHONE_SBER" "$RECIPIENT_BANK_ID_SBER" "$LIMIT_TEST_AMOUNT_1" "CORRECT" 200 "SUCCESSFUL" "LimitSetupSber"
+SETUP_PASSED=$?
+if [[ $SETUP_PASSED -ne 0 ]]; then
+    echo -e "\033[0;31mОшибка: Перевод для настройки лимита не удался. Пропуск теста превышения лимита.\033[0m"
+    FAILED_RUNS=$((FAILED_RUNS + 1))
 else
-  echo -e "\033[0;32m All $RUN_COUNT run(s) passed.\033[0m"
-  exit 0
+    echo "[Тест LimitExceed-Check.7] Попытка перевода, превышающего лимит (Получатель: $RECIPIENT_PHONE_SBER, Сумма: $LIMIT_TEST_AMOUNT_2)"
+    LIMIT_OUTPUT_FILE=$(mktemp)
+    LIMIT_STATUS=$(curl -X POST "$BASE_URL/api/transfers" \
+         -u "$USER_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" \
+         -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE_SBER'","amount": '$LIMIT_TEST_AMOUNT_2',"bankId": "'$RECIPIENT_BANK_ID_SBER'"}' \
+         --connect-timeout 5 --max-time 15 \
+         --silent --show-error -o "$LIMIT_OUTPUT_FILE" --write-out "%{http_code}")
+    LIMIT_BODY=$(cat "$LIMIT_OUTPUT_FILE"); rm "$LIMIT_OUTPUT_FILE" &> /dev/null
+    # Ожидаем 400 Bad Request, так как TransferLimitExceededException должен обрабатываться GlobalExceptionHandler
+    if ! print_result "[Тест LimitExceed-Check.7]" "$LIMIT_STATUS" 400 "$LIMIT_BODY"; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
+    if [[ "$LIMIT_STATUS" -eq 400 ]]; then
+        if echo "$LIMIT_BODY" | jq -e '.message | test("Daily transfer limit exceeded")' > /dev/null; then
+            echo "       Проверка сообщения об ошибке: Найдено 'Daily transfer limit exceeded' -> PASS"
+        else
+            echo "       Проверка сообщения об ошибке: Ожидаемое сообщение не найдено -> FAIL"
+            # FAILED_RUNS=$((FAILED_RUNS + 1)) # Можно раскомментировать, если считаем это провалом
+        fi
+    fi
 fi
+
+
+# --- Сценарий 8: Попытка перевода получателю с банком, не поддерживающим СБП ---
+echo ""
+echo "--- ЗАПУСК ЦИКЛА NonSbpBank (8) ---"
+echo "[Тест NonSbpBank-Init.8] Инициация перевода получателю с банком без поддержки СБП (Телефон: $RECIPIENT_PHONE_CLOSED, Банк: $RECIPIENT_BANK_ID_CLOSED)"
+NON_SBP_OUTPUT_FILE=$(mktemp)
+NON_SBP_STATUS=$(curl -X POST "$BASE_URL/api/transfers" \
+     -u "$USER_CREDS" -H "Content-Type: application/json" -H "X-Phone-Number: $SENDER_PHONE" \
+     -d '{"recipientPhoneNumber": "'$RECIPIENT_PHONE_CLOSED'","amount": '$SMALL_AMOUNT',"bankId": "'$RECIPIENT_BANK_ID_CLOSED'"}' \
+     --connect-timeout 5 --max-time 15 \
+     --silent --show-error -o "$NON_SBP_OUTPUT_FILE" --write-out "%{http_code}")
+NON_SBP_BODY=$(cat "$NON_SBP_OUTPUT_FILE"); rm "$NON_SBP_OUTPUT_FILE" &> /dev/null
+# Ожидаем ошибку 400 или 422, так как SbpAdapter вернет Optional.empty() и TransferService должен выдать исключение (например, BankNotFoundException или RecipientBankNotAvailableException)
+# Точный код зависит от реализации обработчика исключений. Предположим 400.
+if ! print_result "[Тест NonSbpBank-Init.8]" "$NON_SBP_STATUS" 400 "$NON_SBP_BODY"; then FAILED_RUNS=$((FAILED_RUNS + 1)); fi
+# Дополнительная проверка сообщения (опционально)
+if [[ "$NON_SBP_STATUS" -eq 400 ]]; then
+    if echo "$NON_SBP_BODY" | jq -e '.message | test("Recipient bank .* does not support SBP")' > /dev/null || \
+       echo "$NON_SBP_BODY" | jq -e '.message | test("Bank with ID .* not found or does not support SBP")' > /dev/null || \
+       echo "$NON_SBP_BODY" | jq -e '.message | test("Recipient bank not available")' > /dev/null ; then # Проверяем разные возможные сообщения
+        echo "       Проверка сообщения об ошибке: Найдено ожидаемое сообщение об ошибке банка -> PASS"
+    else
+        echo "       Проверка сообщения об ошибке: Ожидаемое сообщение не найдено -> FAIL"
+    fi
+fi
+
+
+# --- Итоговый результат ---
+echo ""
+echo "======================================"
+echo " Тестовый скрипт завершен           "
+echo "======================================"
+if [ $FAILED_RUNS -gt 0 ]; then
+  echo -e "\033[0;31m $FAILED_RUNS сценарий(ев) завершились с ошибкой.\033[0m"
+  exit 1 # Завершаем скрипт с кодом ошибки
+else
+  echo -e "\033[0;32m Все сценарии прошли успешно.\033[0m"
+  exit 0 # Завершаем скрипт успешно
+fi
+
+# set +x

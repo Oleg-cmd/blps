@@ -92,7 +92,7 @@ public class JmsConverterConfig {
   // Фабрика для слушателей (НЕ JTA)
   @Bean
   public JmsListenerContainerFactory<?> jmsListenerContainerFactory(
-    ConnectionFactory connectionFactory, // Теперь будет внедрена наша явно созданная фабрика
+    ConnectionFactory connectionFactory,
     DefaultJmsListenerContainerFactoryConfigurer configurer,
     MessageConverter messageConverter
   ) {

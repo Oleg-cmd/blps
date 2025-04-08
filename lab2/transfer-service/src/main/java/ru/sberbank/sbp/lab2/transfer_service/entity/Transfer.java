@@ -23,9 +23,7 @@ import ru.sberbank.sbp.lab2.transfer_service.entity.enums.TransferStatus;
 public class Transfer {
 
   @Id
-  // Лучше использовать UUID, генерируемый приложением, для распределенных систем
-  // Или настроить последовательность в БД, если предпочитаешь Long
-  @GeneratedValue(strategy = GenerationType.UUID) // Оставляем UUID
+  @GeneratedValue(strategy = GenerationType.UUID)
   private UUID id;
 
   @NotBlank
@@ -38,31 +36,29 @@ public class Transfer {
   @Column(nullable = false, length = 10)
   private String recipientPhoneNumber;
 
-  @NotNull // Добавим NotNull
+  @NotNull
   @DecimalMin("0.01")
-  @Column(nullable = false, precision = 19, scale = 2) // Укажем точность
+  @Column(nullable = false, precision = 19, scale = 2)
   private BigDecimal amount;
 
-  @NotBlank // Добавим NotBlank
+  @NotBlank
   @Column(nullable = false)
-  private String recipientBankId; // ID банка получателя (из ЛР1)
+  private String recipientBankId;
 
   @Column(nullable = true) // Имя может быть не сразу известно
-  private String recipientBankName; // Имя банка получателя (из ЛР1)
+  private String recipientBankName;
 
-  @NotNull // Добавим NotNull
+  @NotNull
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
   private TransferStatus status;
 
-  @NotNull // Добавим NotNull
+  @NotNull
   @Column(nullable = false)
   private LocalDateTime createdAt;
 
   private LocalDateTime completedAt;
 
-  // Код подтверждения может не храниться в БД постоянно,
-  // но если храним, то так:
   @Column(length = 6)
   private String confirmationCode;
 
@@ -70,7 +66,7 @@ public class Transfer {
   private String sbpTransactionId;
 
   @Column(nullable = false)
-  private int retryCount = 0; // Инициализируем нулем
+  private int retryCount = 0;
 
   private String failureReason;
 
