@@ -20,7 +20,6 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
   );
 
   // Сумма успешных переводов пользователя за период (для лимитов)
-  // ВАЖНО: Убедись, что TransferStatus.SUCCESSFUL используется правильно
   @Query(
     "SELECT COALESCE(SUM(t.amount), 0) FROM Transfer t WHERE t.senderPhoneNumber = :phoneNumber " +
     "AND t.createdAt >= :startDate AND t.status = 'SUCCESSFUL'"
@@ -31,7 +30,6 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
   );
 
   // Поиск "зависших" переводов (для возможной фоновой обработки)
-  // ВАЖНО: Убедись, что TransferStatus.PROCESSING используется правильно
   @Query(
     "SELECT t FROM Transfer t WHERE t.status = 'PROCESSING' AND t.createdAt < :timeout"
   )

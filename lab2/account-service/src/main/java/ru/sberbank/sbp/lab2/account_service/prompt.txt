@@ -1,0 +1,950 @@
+**====================================**
+path: dto/SendSuccessNotificationCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import ru.sberbank.sbp.lab2.account_service.dto.NotificationCommand;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class SendSuccessNotificationCommand implements NotificationCommand {
+
+  private static final long serialVersionUID = 1L;
+  private String senderPhoneNumber; // кому отправлять
+  private BigDecimal amount;
+  private String recipientInfo; // Инфо о получателе (номер/банк)
+  private UUID correlationId;
+}
+
+**====================================**
+path: dto/SendFailureNotificationCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class SendFailureNotificationCommand implements NotificationCommand {
+
+  private static final long serialVersionUID = 1L;
+  private String senderPhoneNumber; // кому отправлять
+  private BigDecimal amount;
+  private String reason; // причина неудачи
+  private UUID correlationId;
+}
+
+**====================================**
+path: dto/NotificationCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.io.Serializable;
+import java.util.UUID;
+
+// Опциональный общий интерфейс для команд уведомлений
+public interface NotificationCommand extends Serializable {
+  UUID getCorrelationId(); // ID исходного перевода
+}
+
+**====================================**
+path: dto/SendConfirmationCodeCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class SendConfirmationCodeCommand implements NotificationCommand {
+
+  private static final long serialVersionUID = 1L;
+  private String phoneNumber;
+  private String code;
+  private UUID correlationId;
+}
+
+**====================================**
+path: dto/CompleteTransferCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+// Здесь не нужен Builder и общий интерфейс, так как этот класс только для приема
+public class CompleteTransferCommand implements Serializable {
+
+  private static final long serialVersionUID = 1L;
+
+  private String senderPhoneNumber;
+  private String recipientPhoneNumber;
+  private BigDecimal amount;
+  private UUID correlationId; // ID оригинального перевода (Transfer.id)
+}
+
+**====================================**
+path: dto/ReserveFundsCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReserveFundsCommand implements Serializable { // Должен быть Serializable
+
+  private static final long serialVersionUID = 1L;
+
+  private String phoneNumber;
+  private BigDecimal amount;
+  private UUID correlationId; // ID перевода
+}
+
+**====================================**
+path: dto/ReleaseFundsCommand.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.dto;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReleaseFundsCommand implements Serializable {
+
+  private static final long serialVersionUID = 1L;
+  private String phoneNumber;
+  private BigDecimal amount;
+  private UUID correlationId;
+}
+
+**====================================**
+path: AccountServiceApplication.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.boot.autoconfigure.sql.init.SqlInitializationAutoConfiguration;
+import org.springframework.jms.annotation.EnableJms;
+
+@SpringBootApplication(
+  exclude = {
+    DataSourceAutoConfiguration.class,
+    DataSourceTransactionManagerAutoConfiguration.class,
+    SqlInitializationAutoConfiguration.class,
+  }
+)
+@EnableJms
+public class AccountServiceApplication {
+
+  public static void main(String[] args) {
+    SpringApplication.run(AccountServiceApplication.class, args);
+  }
+}
+
+**====================================**
+path: repository/AccountRepository.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.repository;
+
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+import ru.sberbank.sbp.lab2.account_service.entity.Account;
+
+@Repository
+public interface AccountRepository extends JpaRepository<Account, Long> {
+  // Метод для поиска счета по номеру телефона
+  Optional<Account> findByPhoneNumber(String phoneNumber);
+  // JpaRepository уже предоставляет save, findById, findAll, deleteById и т.д.
+}
+
+**====================================**
+path: config/DataSourceConfig.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.config;
+
+import com.atomikos.jdbc.AtomikosDataSourceBean; // Важно: это класс Atomikos
+import java.util.Properties;
+import javax.sql.DataSource;
+import org.postgresql.xa.PGXADataSource; // Используем конкретный XADataSource
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class DataSourceConfig {
+
+  // Внедряем значения из application.properties (секция spring.jta.atomikos.datasource)
+  @Value("${spring.jta.atomikos.datasource.unique-resource-name}")
+  private String uniqueResourceName;
+
+  @Value("${spring.jta.atomikos.datasource.xa-properties.url}")
+  private String url;
+
+  @Value("${spring.jta.atomikos.datasource.xa-properties.user}")
+  private String user;
+
+  @Value("${spring.jta.atomikos.datasource.xa-properties.password}")
+  private String password;
+
+  @Value("${spring.jta.atomikos.datasource.max-pool-size:10}") // Значение по умолчанию
+  private int maxPoolSize;
+
+  @Value("${spring.jta.atomikos.datasource.min-pool-size:2}") // Значение по умолчанию
+  private int minPoolSize;
+
+  @Value("${spring.jta.atomikos.datasource.test-query:SELECT 1}") // Значение по умолчанию
+  private String testQuery;
+
+  @Bean(name = "dataSource", initMethod = "init", destroyMethod = "close")
+  public DataSource dataSource() {
+    // 1. Создаем реальный XA DataSource
+    PGXADataSource pgXaDataSource = new PGXADataSource();
+    pgXaDataSource.setUrl(url);
+    pgXaDataSource.setUser(user);
+    pgXaDataSource.setPassword(password);
+
+    // 2. Оборачиваем его в AtomikosDataSourceBean
+    AtomikosDataSourceBean atomikosDataSourceBean =
+      new AtomikosDataSourceBean();
+    atomikosDataSourceBean.setXaDataSource(pgXaDataSource);
+    atomikosDataSourceBean.setUniqueResourceName(uniqueResourceName);
+    atomikosDataSourceBean.setMaxPoolSize(maxPoolSize);
+    atomikosDataSourceBean.setMinPoolSize(minPoolSize);
+    atomikosDataSourceBean.setTestQuery(testQuery);
+    // atomikosDataSourceBean.setBorrowConnectionTimeout(60); // Таймаут ожидания соединения из пула (сек)
+    // atomikosDataSourceBean.setReapTimeout(0); // Таймаут для "мертвых" соединений (0 - отключено)
+    // atomikosDataSourceBean.setMaxIdleTime(60); // Время простоя перед удалением из пула
+
+    System.out.println("Initializing AtomikosDataSourceBean with URL: " + url); // Отладочный вывод
+
+    return atomikosDataSourceBean;
+  }
+}
+
+**====================================**
+path: entity/Account.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import java.math.BigDecimal;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "accounts") // Явно укажем имя таблицы
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Account {
+
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY) // Используем автоинкремент БД
+  private Long id;
+
+  @NotBlank(message = "Phone number is mandatory")
+  @Pattern(regexp = "\\d{10}", message = "Phone number must be 10 digits")
+  @Column(nullable = false, unique = true, length = 10) // Номер телефона - уникальный ключ
+  private String phoneNumber;
+
+  @NotNull(message = "Balance cannot be null")
+  @DecimalMin(value = "0.00", message = "Balance cannot be negative")
+  @Column(nullable = false, precision = 19, scale = 2) // Тип для денег
+  private BigDecimal balance;
+
+  @NotNull(message = "Reserved amount cannot be null")
+  @DecimalMin(value = "0.00", message = "Reserved amount cannot be negative")
+  @Column(nullable = false, precision = 19, scale = 2)
+  private BigDecimal reservedAmount;
+
+  @Version // Для оптимистичной блокировки
+  private Long version;
+
+  // Инициализация полей по умолчанию в конструкторе без аргументов
+  public Account(String phoneNumber) {
+    this.phoneNumber = phoneNumber;
+    this.balance = BigDecimal.ZERO;
+    this.reservedAmount = BigDecimal.ZERO;
+  }
+}
+
+**====================================**
+path: service/AccountService.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.service;
+
+import java.math.BigDecimal;
+import java.util.Optional;
+import java.util.UUID;
+import ru.sberbank.sbp.lab2.account_service.entity.Account;
+
+public interface AccountService {
+  /**
+   * Проверяет, достаточно ли средств на счете (баланс минус резерв).
+   * @param phoneNumber Номер телефона.
+   * @param amount Сумма для проверки.
+   * @return true, если средств достаточно, иначе false.
+   * @throws ru.sberbank.sbp.lab2.account.exception.AccountNotFoundException если счет не найден.
+   */
+  boolean hasEnoughBalance(String phoneNumber, BigDecimal amount);
+
+  /**
+   * Резервирует средства на счете.
+   * Увеличивает reservedAmount.
+   * @param phoneNumber Номер телефона.
+   * @param amount Сумма для резервирования.
+   * @throws ru.sberbank.sbp.lab2.account.exception.AccountNotFoundException если счет не найден.
+   * @throws ru.sberbank.sbp.lab2.account.exception.InsufficientFundsException если недостаточно средств.
+   */
+  void reserveFunds(String phoneNumber, BigDecimal amount);
+
+  /**
+   * Освобождает ранее зарезервированные средства (используется при отмене перевода).
+   * Уменьшает reservedAmount. Не должен падать, если счет не найден.
+   * @param phoneNumber Номер телефона.
+   * @param amount Сумма для освобождения.
+   * @param correlationId ID оригинального перевода для логирования.
+   */
+  void releaseFunds(String phoneNumber, BigDecimal amount, UUID correlationId);
+
+  /**
+   * Завершает перевод: списывает средства с баланса отправителя
+   * (уменьшает balance и reservedAmount) и зачисляет на баланс получателя.
+   * Этот метод должен быть атомарным для обоих счетов.
+   * @param senderPhoneNumber Номер телефона отправителя.
+   * @param recipientPhoneNumber Номер телефона получателя.
+   * @param amount Сумма перевода.
+   * @param correlationId ID оригинального перевода для логирования.
+   * @throws ru.sberbank.sbp.lab2.account_service.exception.AccountNotFoundException если счет отправителя не найден.
+   * @throws IllegalStateException если зарезервированная сумма отправителя меньше суммы перевода.
+   * @throws RuntimeException при других ошибках (например, проблема с созданием счета получателя).
+   */
+  void completeTransfer(
+    String senderPhoneNumber,
+    String recipientPhoneNumber,
+    BigDecimal amount,
+    UUID correlationId
+  );
+
+  /**
+   * Получает текущий баланс счета.
+   * @param phoneNumber Номер телефона.
+   * @return Текущий баланс.
+   * @throws ru.sberbank.sbp.lab2.account.exception.AccountNotFoundException если счет не найден.
+   */
+  BigDecimal getBalance(String phoneNumber);
+
+  /**
+   * Получает текущую зарезервированную сумму.
+   * @param phoneNumber Номер телефона.
+   * @return Зарезервированная сумма.
+   * @throws ru.sberbank.sbp.lab2.account.exception.AccountNotFoundException если счет не найден.
+   */
+  BigDecimal getReservedAmount(String phoneNumber);
+}
+
+**====================================**
+path: service/AccountServiceImpl.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.service;
+
+import jakarta.transaction.Transactional;
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Optional;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import ru.sberbank.sbp.lab2.account_service.entity.Account;
+import ru.sberbank.sbp.lab2.account_service.exception.AccountNotFoundException;
+import ru.sberbank.sbp.lab2.account_service.exception.InsufficientFundsException;
+import ru.sberbank.sbp.lab2.account_service.repository.AccountRepository;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AccountServiceImpl implements AccountService {
+
+  private final AccountRepository accountRepository;
+
+  // Проверка баланса - операция чтения
+  @Override
+  @Transactional
+  public boolean hasEnoughBalance(String phoneNumber, BigDecimal amount) {
+    log.debug("Checking balance for {} amount {}", phoneNumber, amount);
+    Account account = getAccountByPhoneNumber(phoneNumber);
+    // Доступный баланс = Общий баланс - Зарезервированная сумма
+    BigDecimal availableBalance = account
+      .getBalance()
+      .subtract(account.getReservedAmount());
+    boolean enough = availableBalance.compareTo(amount) >= 0;
+    log.debug(
+      "Available balance for {}: {}. Enough: {}",
+      phoneNumber,
+      availableBalance,
+      enough
+    );
+    return enough;
+  }
+
+  // Резервирование средств - операция записи
+  @Override
+  @Transactional
+  public void reserveFunds(String phoneNumber, BigDecimal amount) {
+    log.info("Reserving funds {} for phone number: {}", amount, phoneNumber);
+    if (amount.compareTo(BigDecimal.ZERO) < 0) {
+      throw new IllegalArgumentException("Cannot reserve negative amount");
+    }
+    Account account = getAccountByPhoneNumber(phoneNumber);
+
+    if (!hasEnoughBalance(phoneNumber, amount)) {
+      log.warn("Insufficient funds for phone number: {}", phoneNumber);
+      throw new InsufficientFundsException(
+        "Insufficient funds for phone number: " + phoneNumber
+      );
+    }
+
+    account.setReservedAmount(account.getReservedAmount().add(amount));
+    accountRepository.save(account); // Сохраняем изменения
+    log.info(
+      "Funds reserved successfully for {}. New reserved amount: {}",
+      phoneNumber,
+      account.getReservedAmount()
+    );
+  }
+
+  // Только для внутреннего использования
+  @Transactional
+  protected void releaseReservedFundsInternal(
+    String phoneNumber,
+    BigDecimal amount
+  ) {
+    Account account = getAccountByPhoneNumber(phoneNumber);
+    BigDecimal newReserved = account.getReservedAmount().subtract(amount);
+    if (newReserved.compareTo(BigDecimal.ZERO) < 0) {
+      log.error(
+        "Attempted to release more funds ({}) than reserved ({}) for {}",
+        amount,
+        account.getReservedAmount(),
+        phoneNumber
+      );
+      newReserved = BigDecimal.ZERO;
+    }
+    account.setReservedAmount(newReserved);
+    // Не сохраняем здесь, сохранение будет в вызывающем методе (completeTransfer)
+    log.info(
+      "Internal releaseReservedFunds: New reserved amount for {}: {}",
+      phoneNumber,
+      newReserved
+    );
+  }
+
+  @Override
+  @Transactional // Участвует в JTA транзакции слушателя
+  public void releaseFunds(
+    String phoneNumber,
+    BigDecimal amount,
+    UUID correlationId
+  ) {
+    log.info(
+      "[CorrelationId: {}] Releasing reserved funds {} for phone number: {}",
+      correlationId,
+      amount,
+      phoneNumber
+    );
+    if (amount.compareTo(BigDecimal.ZERO) < 0) {
+      // Можно просто залогировать и выйти, т.к. это не ошибка бизнес-процесса
+      log.warn(
+        "[CorrelationId: {}] Cannot release negative amount: {}",
+        correlationId,
+        amount
+      );
+      return;
+    }
+
+    try {
+      Account account = getAccountByPhoneNumber(phoneNumber); // Ищем счет
+
+      BigDecimal newReserved = account.getReservedAmount().subtract(amount);
+      if (newReserved.compareTo(BigDecimal.ZERO) < 0) {
+        log.warn(
+          // Логируем как WARN, т.к. это может быть при повторной обработке
+          "[CorrelationId: {}] Attempted to release more funds ({}) than reserved ({}) for {}. Setting reserved to 0.",
+          correlationId,
+          amount,
+          account.getReservedAmount(),
+          phoneNumber
+        );
+        newReserved = BigDecimal.ZERO;
+      }
+      account.setReservedAmount(newReserved);
+      accountRepository.save(account); // Сохраняем изменения
+      log.info(
+        "[CorrelationId: {}] Reserved funds released successfully for {}. New reserved amount: {}",
+        correlationId,
+        phoneNumber,
+        account.getReservedAmount()
+      );
+    } catch (AccountNotFoundException e) {
+      // Если счет не найден - это нормально в этом сценарии (возможно, резерв и не создавался).
+      // Просто логируем и НЕ бросаем исключение дальше, чтобы JTA закоммитила транзакцию JMS.
+      log.warn(
+        "[CorrelationId: {}] Account not found while trying to release funds for phone number: {}. Assuming reservation was not made or already cancelled.",
+        correlationId,
+        phoneNumber
+      );
+    }
+    // Другие RuntimeException будут пойманы и обработаны в слушателе
+  }
+
+  @Override
+  @Transactional
+  public void completeTransfer(
+    String senderPhoneNumber,
+    String recipientPhoneNumber,
+    BigDecimal amount,
+    UUID correlationId
+  ) {
+    log.info(
+      "[CorrelationId: {}] Completing transfer of {} from {} to {}",
+      correlationId,
+      amount,
+      senderPhoneNumber,
+      recipientPhoneNumber
+    );
+    if (amount.compareTo(BigDecimal.ZERO) < 0) {
+      throw new IllegalArgumentException("Cannot transfer negative amount");
+    }
+
+    // 1. Найти счет отправителя (он должен существовать)
+    Account senderAccount = getAccountByPhoneNumber(senderPhoneNumber);
+
+    // 2. Проверить зарезервированную сумму отправителя
+    // Эта проверка остается важной на случай гонки или неконсистентности
+    if (senderAccount.getReservedAmount().compareTo(amount) < 0) {
+      log.error(
+        "[CorrelationId: {}] Attempt to complete transfer for sender {}, but reserved amount {} is less than transfer amount {}",
+        correlationId,
+        senderPhoneNumber,
+        senderAccount.getReservedAmount(),
+        amount
+      );
+      throw new IllegalStateException(
+        "Cannot complete transfer, inconsistent reserved amount for sender: " +
+        senderPhoneNumber
+      );
+    }
+
+    // 3. Найти счет получателя (он ТОЖЕ должен существовать)
+    Account recipientAccount = getAccountByPhoneNumber(recipientPhoneNumber);
+
+    // 4. Выполнить дебет отправителя
+    // Сначала вызываем внутренний метод для уменьшения резерва (без сохранения)
+    releaseReservedFundsInternal(senderPhoneNumber, amount);
+    // Затем уменьшаем баланс
+    senderAccount.setBalance(senderAccount.getBalance().subtract(amount));
+    log.info(
+      "[CorrelationId: {}] Debited amount {} from sender {}. New balance: {}, New reserved: {}",
+      correlationId,
+      amount,
+      senderPhoneNumber,
+      senderAccount.getBalance(),
+      senderAccount.getReservedAmount()
+    );
+
+    // 5. Выполнить кредит получателя
+    recipientAccount.setBalance(recipientAccount.getBalance().add(amount));
+    log.info(
+      "[CorrelationId: {}] Credited amount {} to recipient {}. New balance: {}",
+      correlationId,
+      amount,
+      recipientPhoneNumber,
+      recipientAccount.getBalance()
+    );
+
+    // 6. Сохранить оба измененных счета АТОМАРНО
+    // Передаем обновленные объекты senderAccount и recipientAccount
+    accountRepository.saveAll(Arrays.asList(senderAccount, recipientAccount));
+    log.info(
+      "[CorrelationId: {}] Successfully saved changes for sender {} and recipient {}",
+      correlationId,
+      senderPhoneNumber,
+      recipientPhoneNumber
+    );
+  }
+
+  @Override
+  @Transactional
+  public BigDecimal getBalance(String phoneNumber) {
+    return getAccountByPhoneNumber(phoneNumber).getBalance();
+  }
+
+  @Override
+  @Transactional
+  public BigDecimal getReservedAmount(String phoneNumber) {
+    return getAccountByPhoneNumber(phoneNumber).getReservedAmount();
+  }
+
+  // Вспомогательный приватный метод для получения счета
+  private Account getAccountByPhoneNumber(String phoneNumber) {
+    return accountRepository
+      .findByPhoneNumber(phoneNumber)
+      .orElseThrow(() -> {
+        log.warn("Account not found for phone number: {}", phoneNumber);
+        return new AccountNotFoundException(
+          "Account not found for phone number: " + phoneNumber
+        );
+      });
+  }
+}
+
+**====================================**
+path: jms/JmsConfig.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.jms;
+
+public final class JmsConfig { // Используем final класс без конструктора
+
+  private JmsConfig() { // Приватный конструктор, чтобы нельзя было создать экземпляр
+  }
+
+  // --- Account Service Queues ---
+  public static final String ACCOUNT_RESERVE_FUNDS_QUEUE =
+    "account.command.reserve.queue";
+  public static final String ACCOUNT_COMPLETE_TRANSFER_QUEUE =
+    "account.command.complete.queue";
+  public static final String ACCOUNT_RELEASE_FUNDS_QUEUE =
+    "account.command.release.queue";
+
+  // --- Notification Service Queues ---
+  public static final String NOTIFICATION_SEND_CODE_QUEUE =
+    "notification.command.sendcode.queue";
+  public static final String NOTIFICATION_SEND_SUCCESS_QUEUE =
+    "notification.command.sendsuccess.queue";
+  public static final String NOTIFICATION_SEND_FAILURE_QUEUE =
+    "notification.command.sendfailure.queue";
+}
+
+**====================================**
+path: jms/AccountCommandListener.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.jms;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jms.annotation.JmsListener;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.stereotype.Component;
+import ru.sberbank.sbp.lab2.account_service.dto.CompleteTransferCommand;
+import ru.sberbank.sbp.lab2.account_service.dto.ReleaseFundsCommand;
+import ru.sberbank.sbp.lab2.account_service.dto.ReserveFundsCommand;
+import ru.sberbank.sbp.lab2.account_service.exception.AccountNotFoundException;
+import ru.sberbank.sbp.lab2.account_service.exception.InsufficientFundsException;
+import ru.sberbank.sbp.lab2.account_service.service.AccountService;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class AccountCommandListener {
+
+  private final AccountService accountService;
+
+  @JmsListener(
+    destination = JmsConfig.ACCOUNT_RESERVE_FUNDS_QUEUE,
+    containerFactory = "jmsListenerContainerFactory"
+  )
+  public void handleReserveFundsCommand(@Payload ReserveFundsCommand command) {
+    log.info(
+      "Received and converted JMS message on queue '{}': {}",
+      JmsConfig.ACCOUNT_RESERVE_FUNDS_QUEUE,
+      command
+    );
+    try {
+      accountService.reserveFunds(
+        command.getPhoneNumber(),
+        command.getAmount()
+      );
+      log.info(
+        "Successfully processed ReserveFundsCommand with correlationId: {}",
+        command.getCorrelationId()
+      );
+    } catch (AccountNotFoundException | InsufficientFundsException e) {
+      log.warn(
+        "Business error processing ReserveFundsCommand with correlationId: {}. Reason: {}",
+        command.getCorrelationId(),
+        e.getMessage()
+      );
+      throw new RuntimeException(
+        "Business error processing command " + command.getCorrelationId(),
+        e
+      );
+    } catch (Exception e) {
+      log.error(
+        "Unexpected error processing ReserveFundsCommand with correlationId: {}. Error: {}",
+        command.getCorrelationId(),
+        e.getMessage(),
+        e
+      );
+      throw new RuntimeException(
+        "Unexpected error processing command " + command.getCorrelationId(),
+        e
+      );
+    }
+  }
+
+  @JmsListener(
+    destination = JmsConfig.ACCOUNT_COMPLETE_TRANSFER_QUEUE,
+    containerFactory = "jmsListenerContainerFactory"
+  )
+  public void handleCompleteTransferCommand(
+    @Payload CompleteTransferCommand command
+  ) {
+    log.info(
+      "Received and converted JMS message on queue '{}': {}",
+      JmsConfig.ACCOUNT_COMPLETE_TRANSFER_QUEUE,
+      command
+    );
+    try {
+      // Вызываем новый метод сервиса для завершения перевода
+      accountService.completeTransfer(
+        command.getSenderPhoneNumber(),
+        command.getRecipientPhoneNumber(),
+        command.getAmount(),
+        command.getCorrelationId() // Передаем ID для логов/отслеживания
+      );
+      log.info(
+        "Successfully processed CompleteTransferCommand with correlationId: {}",
+        command.getCorrelationId()
+      );
+    } catch (
+      AccountNotFoundException
+      | InsufficientFundsException
+      | IllegalStateException e
+    ) {
+      // IllegalStateException может быть из проверки резерва
+      log.warn(
+        "Business error processing CompleteTransferCommand with correlationId: {}. Reason: {}",
+        command.getCorrelationId(),
+        e.getMessage()
+      );
+      // Откатываем транзакцию
+      throw new RuntimeException(
+        "Business error processing command " + command.getCorrelationId(),
+        e
+      );
+    } catch (Exception e) {
+      log.error(
+        "Unexpected error processing CompleteTransferCommand with correlationId: {}. Error: {}",
+        command.getCorrelationId(),
+        e.getMessage(),
+        e
+      );
+      // Откатываем транзакцию
+      throw new RuntimeException(
+        "Unexpected error processing command " + command.getCorrelationId(),
+        e
+      );
+    }
+  }
+
+  @JmsListener(
+    destination = JmsConfig.ACCOUNT_RELEASE_FUNDS_QUEUE,
+    containerFactory = "jmsListenerContainerFactory"
+  )
+  public void handleReleaseFundsCommand(@Payload ReleaseFundsCommand command) {
+    log.info(
+      "Received and converted JMS message on queue '{}': {}",
+      JmsConfig.ACCOUNT_RELEASE_FUNDS_QUEUE,
+      command
+    );
+    try {
+      accountService.releaseFunds(
+        command.getPhoneNumber(),
+        command.getAmount(),
+        command.getCorrelationId()
+      );
+      log.info(
+        "Successfully processed ReleaseFundsCommand with correlationId: {}",
+        command.getCorrelationId()
+      );
+    } catch (AccountNotFoundException e) {
+      // Важно: Что делать, если счет не найден при попытке отменить резерв?
+      // Вероятно, это ошибка, но не критичная для отката. Просто логируем.
+      log.warn(
+        "Account not found while processing ReleaseFundsCommand with correlationId: {}. Reason: {}",
+        command.getCorrelationId(),
+        e.getMessage()
+      );
+      // Не бросаем исключение, чтобы JTA закоммитила транзакцию (сообщение будет удалено)
+    } catch (Exception e) {
+      log.error(
+        "Unexpected error processing ReleaseFundsCommand with correlationId: {}. Error: {}",
+        command.getCorrelationId(),
+        e.getMessage(),
+        e
+      );
+      // Откатываем транзакцию при неожиданных ошибках
+      throw new RuntimeException(
+        "Unexpected error processing command " + command.getCorrelationId(),
+        e
+      );
+    }
+  }
+}
+
+**====================================**
+path: jms/JmsConverterConfig.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.jms;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.jms.ConnectionFactory;
+import java.util.HashMap;
+import java.util.Map;
+import org.springframework.boot.autoconfigure.jms.DefaultJmsListenerContainerFactoryConfigurer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.config.DefaultJmsListenerContainerFactory;
+import org.springframework.jms.config.JmsListenerContainerFactory;
+import org.springframework.jms.support.converter.MappingJackson2MessageConverter;
+import org.springframework.jms.support.converter.MessageConverter;
+import org.springframework.jms.support.converter.MessageType;
+import ru.sberbank.sbp.lab2.account_service.dto.CompleteTransferCommand;
+import ru.sberbank.sbp.lab2.account_service.dto.ReleaseFundsCommand;
+import ru.sberbank.sbp.lab2.account_service.dto.ReserveFundsCommand;
+
+@Configuration
+public class JmsConverterConfig {
+
+  @Bean
+  public ObjectMapper objectMapper() {
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.registerModule(new JavaTimeModule());
+    return mapper;
+  }
+
+  @Bean
+  public MessageConverter jacksonJmsMessageConverter(
+    ObjectMapper objectMapper
+  ) {
+    MappingJackson2MessageConverter converter =
+      new MappingJackson2MessageConverter();
+    converter.setTargetType(MessageType.TEXT);
+    converter.setTypeIdPropertyName("_type");
+    converter.setObjectMapper(objectMapper);
+
+    Map<String, Class<?>> typeIdMappings = new HashMap<>();
+    // Маппинг для ReserveFundsCommand
+    typeIdMappings.put(
+      "ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReserveFundsCommand",
+      ReserveFundsCommand.class
+    );
+    // Маппинг для CompleteTransferCommand
+    typeIdMappings.put(
+      "ru.sberbank.sbp.lab2.transfer_service.dto.jms.CompleteTransferCommand",
+      CompleteTransferCommand.class
+    );
+    // Маппинг для ReleaseFundsCommand
+    typeIdMappings.put(
+      "ru.sberbank.sbp.lab2.transfer_service.dto.jms.ReleaseFundsCommand",
+      ReleaseFundsCommand.class
+    );
+
+    converter.setTypeIdMappings(typeIdMappings);
+
+    return converter;
+  }
+
+  @Bean // Фабрика слушателей
+  public JmsListenerContainerFactory<?> jmsListenerContainerFactory(
+    ConnectionFactory connectionFactory,
+    DefaultJmsListenerContainerFactoryConfigurer configurer,
+    MessageConverter messageConverter,
+    org.springframework.transaction.PlatformTransactionManager transactionManager
+  ) {
+    DefaultJmsListenerContainerFactory factory =
+      new DefaultJmsListenerContainerFactory();
+    configurer.configure(factory, connectionFactory);
+    factory.setMessageConverter(messageConverter);
+    factory.setTransactionManager(transactionManager);
+    factory.setSessionTransacted(true);
+    return factory;
+  }
+}
+
+**====================================**
+path: exception/InsufficientFundsException.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.exception;
+
+public class InsufficientFundsException extends RuntimeException {
+    public InsufficientFundsException(String message) {
+        super(message);
+    }
+}
+**====================================**
+path: exception/AccountNotFoundException.java
+содержимое:
+package ru.sberbank.sbp.lab2.account_service.exception;
+
+public class AccountNotFoundException extends RuntimeException {
+    public AccountNotFoundException(String message) {
+        super(message);
+    }
+}
