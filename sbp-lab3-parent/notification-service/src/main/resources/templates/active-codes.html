@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Active Confirmation Codes</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 20px;
+        background-color: #f4f4f4;
+        color: #333;
+      }
+      h1 {
+        color: #5a5a5a;
+        border-bottom: 2px solid #ddd;
+        padding-bottom: 10px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+        background-color: #fff;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        text-align: left;
+      }
+      th {
+        background-color: #e9e9e9;
+        color: #555;
+      }
+      tr:nth-child(even) {
+        background-color: #f9f9f9;
+      }
+      tr:hover {
+        background-color: #f1f1f1;
+      }
+      .no-codes {
+        color: #777;
+        font-style: italic;
+      }
+      .code {
+        font-weight: bold;
+        color: #d9534f;
+      }
+      .timestamp {
+        font-size: 0.9em;
+        color: #777;
+      }
+    </style>
+    <meta
+      http-equiv="refresh"
+      content="5"
+    />
+  </head>
+  <body>
+    <h1>Active SBP Confirmation Codes</h1>
+
+    <div th:if="${activeCodes.isEmpty()}">
+      <p class="no-codes">No active confirmation codes at the moment.</p>
+    </div>
+
+    <div th:unless="${activeCodes.isEmpty()}">
+      <table>
+        <thead>
+          <tr>
+            <th>Correlation ID</th>
+            <th>Phone Number</th>
+            <th>Confirmation Code</th>
+            <th>Displayed At (approx.)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="codeEntry : ${activeCodes}">
+            <td th:text="${codeEntry.correlationId}"></td>
+            <td th:text="${codeEntry.phoneNumber}"></td>
+            <td
+              class="code"
+              th:text="${codeEntry.code}"
+            ></td>
+            <td
+              class="timestamp"
+              th:text="${#dates.format(new java.util.Date(codeEntry.createdAt()), 'HH:mm:ss dd-MM-yyyy')}"
+            ></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top: 20px; font-size: 0.8em; color: #888">
+      This page auto-refreshes every 5 seconds. Codes are displayed for
+      approximately 5 minutes.
+    </p>
+  </body>
+</html>
