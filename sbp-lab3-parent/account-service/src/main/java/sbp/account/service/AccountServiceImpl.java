@@ -25,7 +25,7 @@ public class AccountServiceImpl implements AccountService {
   private final JmsTemplate jmsTemplate;
 
   @Override
-  @Transactional // Эта аннотация управляет JTA транзакцией
+  @Transactional
   public void reserveFunds(ReserveFundsCommand command) {
     log.info(
       "Reserving funds: correlationId={}, account={}, amount={}",
@@ -37,12 +37,21 @@ public class AccountServiceImpl implements AccountService {
     Account account = accountRepository
       .findByPhoneNumber(command.getSenderPhoneNumber())
       .orElseThrow(() -> {
+        // Отправляем событие о неудаче, если аккаунт не найден
+        sendFundsProcessedEventInternal(
+          command.getCorrelationId(),
+          command.getSenderPhoneNumber(),
+          null, // recipientPhoneNumber не известен
+          null, // recipientEmail не известен
+          command.getAmount(),
+          false, // success = false
+          "Sender account not found: " + command.getSenderPhoneNumber()
+        );
         log.error(
           "Account not found for phone number: {}",
           command.getSenderPhoneNumber()
         );
         return new RuntimeException(
-          // Это приведет к откату JTA транзакции
           "Account not found: " + command.getSenderPhoneNumber()
         );
       });
@@ -51,6 +60,15 @@ public class AccountServiceImpl implements AccountService {
       .getBalance()
       .subtract(account.getReservedAmount());
     if (availableBalance.compareTo(command.getAmount()) < 0) {
+      sendFundsProcessedEventInternal(
+        command.getCorrelationId(),
+        command.getSenderPhoneNumber(),
+        null, // recipientPhoneNumber
+        null, // recipientEmail
+        command.getAmount(),
+        false, // success = false
+        "Insufficient funds for account: " + command.getSenderPhoneNumber()
+      );
       log.error(
         "Insufficient funds for account: {}. Available: {}, Requested: {}",
         command.getSenderPhoneNumber(),
@@ -58,7 +76,6 @@ public class AccountServiceImpl implements AccountService {
         command.getAmount()
       );
       throw new RuntimeException(
-        // Откатит JTA транзакцию
         "Insufficient funds for account: " + command.getSenderPhoneNumber()
       );
     }
@@ -67,12 +84,21 @@ public class AccountServiceImpl implements AccountService {
       command.getConfirmationCode() == null ||
       command.getConfirmationCode().isBlank()
     ) {
+      // Теоретически, это не должно произойти, так как TransferService генерирует код.
+      sendFundsProcessedEventInternal(
+        command.getCorrelationId(),
+        command.getSenderPhoneNumber(),
+        null, // recipientPhoneNumber
+        null, // recipientEmail
+        command.getAmount(),
+        false, // success = false
+        "Confirmation code is missing in ReserveFundsCommand."
+      );
       log.error(
         "Confirmation code is missing in ReserveFundsCommand for correlationId: {}",
         command.getCorrelationId()
       );
       throw new IllegalStateException(
-        // Откатит JTA транзакцию
         "Confirmation code is mandatory for reserving funds."
       );
     }
@@ -87,31 +113,35 @@ public class AccountServiceImpl implements AccountService {
       account.getReservedAmount()
     );
 
+    // Отправка команды на отправку кода подтверждения
     SendConfirmationCodeCommand codeCommand =
       SendConfirmationCodeCommand.builder()
         .correlationId(command.getCorrelationId())
-        .phoneNumber(command.getSenderPhoneNumber())
+        .phoneNumber(command.getSenderPhoneNumber()) // Код отправляется отправителю
         .code(command.getConfirmationCode())
         .build();
     sendToNotificationService(codeCommand);
 
+    // Отправка события об успешном резервировании
     sendFundsProcessedEventInternal(
       command.getCorrelationId(),
       command.getSenderPhoneNumber(),
-      null,
+      null, // recipientPhoneNumber не актуален для события резервирования
+      null, // recipientEmail не актуален для события резервирования
       command.getAmount(),
-      true,
-      null
+      true, // success = true
+      null // reason
     );
   }
 
   @Override
-  @Transactional // Эта аннотация управляет JTA транзакцией
+  @Transactional
   public void processFundsReleaseOrDebit(ReleaseFundsCommand command) {
     log.info(
-      "Processing funds release/debit: correlationId={}, sender={}, amount={}, finalDebit={}",
+      "Processing funds release/debit: correlationId={}, sender={}, recipient={}, amount={}, finalDebit={}",
       command.getCorrelationId(),
       command.getSenderPhoneNumber(),
+      command.getRecipientPhoneNumber(),
       command.getAmount(),
       command.isFinalDebit()
     );
@@ -123,8 +153,9 @@ public class AccountServiceImpl implements AccountService {
           command.getCorrelationId(),
           command.getSenderPhoneNumber(),
           command.getRecipientPhoneNumber(),
+          null, // recipientEmail не известен, если отправитель не найден
           command.getAmount(),
-          false, // success = false
+          false,
           "Sender account not found: " + command.getSenderPhoneNumber()
         );
         log.error(
@@ -132,12 +163,12 @@ public class AccountServiceImpl implements AccountService {
           command.getSenderPhoneNumber()
         );
         return new RuntimeException(
-          // Это приведет к откату JTA транзакции
           "Sender account not found: " + command.getSenderPhoneNumber()
         );
       });
 
-    boolean isSuccessFinalDebit = false; // Флаг успеха для финального списания
+    String recipientEmail = null;
+    Account recipientAccount = null;
 
     if (command.isFinalDebit()) {
       // --- Финальное списание ---
@@ -149,6 +180,7 @@ public class AccountServiceImpl implements AccountService {
           command.getCorrelationId(),
           command.getSenderPhoneNumber(),
           command.getRecipientPhoneNumber(),
+          null, // recipientEmail
           command.getAmount(),
           false,
           "Recipient phone number is null or blank for final debit."
@@ -162,6 +194,24 @@ public class AccountServiceImpl implements AccountService {
         );
       }
 
+      // Получаем или создаем аккаунт получателя
+      recipientAccount = accountRepository
+        .findByPhoneNumber(command.getRecipientPhoneNumber())
+        .orElseGet(() -> {
+          log.warn(
+            "Recipient account {} not found, creating new one with default email. CorrelationId: {}",
+            command.getRecipientPhoneNumber(),
+            command.getCorrelationId()
+          );
+          Account newRecipient = new Account(command.getRecipientPhoneNumber());
+          newRecipient.setEmail(
+            "recipient." + command.getRecipientPhoneNumber() + "@example.com"
+          );
+          return accountRepository.save(newRecipient);
+        });
+
+      recipientEmail = recipientAccount.getEmail();
+
       if (
         senderAccount.getReservedAmount().compareTo(command.getAmount()) < 0
       ) {
@@ -169,9 +219,13 @@ public class AccountServiceImpl implements AccountService {
           command.getCorrelationId(),
           command.getSenderPhoneNumber(),
           command.getRecipientPhoneNumber(),
+          recipientEmail,
           command.getAmount(),
           false,
-          "Inconsistent reserved amount for final debit."
+          "Inconsistent reserved amount for final debit. Reserved: " +
+          senderAccount.getReservedAmount() +
+          ", Requested: " +
+          command.getAmount()
         );
         log.error(
           "Reserved amount {} < debit amount {} for account {}. CorrelationId: {}",
@@ -201,21 +255,6 @@ public class AccountServiceImpl implements AccountService {
       );
 
       // Операции с БД: зачисление получателю
-      Account recipientAccount = accountRepository
-        .findByPhoneNumber(command.getRecipientPhoneNumber())
-        .orElseGet(() -> {
-          log.warn(
-            "Recipient account {} not found, creating new one. CorrelationId: {}",
-            command.getRecipientPhoneNumber(),
-            command.getCorrelationId()
-          );
-          Account newRecipient = new Account();
-          newRecipient.setPhoneNumber(command.getRecipientPhoneNumber());
-          newRecipient.setBalance(BigDecimal.ZERO);
-          newRecipient.setReservedAmount(BigDecimal.ZERO);
-          return accountRepository.save(newRecipient);
-        });
-
       recipientAccount.setBalance(
         recipientAccount.getBalance().add(command.getAmount())
       );
@@ -226,61 +265,59 @@ public class AccountServiceImpl implements AccountService {
         recipientAccount.getBalance()
       );
 
-      isSuccessFinalDebit = true; // Все операции с БД для финального списания успешны
+      // Отправляем событие об успешной обработке средств
+      sendFundsProcessedEventInternal(
+        command.getCorrelationId(),
+        command.getSenderPhoneNumber(),
+        command.getRecipientPhoneNumber(),
+        recipientEmail,
+        command.getAmount(),
+        true, // success = true
+        null // reason
+      );
+
+      // Отправляем команду о завершении трансфера
+      sendCompleteTransferCommandInternal(
+        command.getCorrelationId(),
+        command.getSenderPhoneNumber(),
+        command.getRecipientPhoneNumber(),
+        command.getAmount()
+      );
     } else {
       // --- Отмена резерва ---
       BigDecimal newReservedAmount = senderAccount
         .getReservedAmount()
         .subtract(command.getAmount());
-      senderAccount.setReservedAmount(newReservedAmount.max(BigDecimal.ZERO));
+      if (newReservedAmount.compareTo(BigDecimal.ZERO) < 0) {
+        log.warn(
+          "Attempt to release more funds ({}) than reserved ({}) for account {}. Setting reserve to 0.",
+          command.getAmount(),
+          senderAccount.getReservedAmount(),
+          senderAccount.getPhoneNumber()
+        );
+        newReservedAmount = BigDecimal.ZERO;
+      }
+      senderAccount.setReservedAmount(newReservedAmount);
       accountRepository.save(senderAccount);
       log.info(
         "Reservation cancelled/reduced for account: {}. New reserved: {}",
         senderAccount.getPhoneNumber(),
         senderAccount.getReservedAmount()
       );
-    }
 
-    if (command.isFinalDebit()) {
-      if (isSuccessFinalDebit) {
-        sendFundsProcessedEventInternal(
-          command.getCorrelationId(),
-          command.getSenderPhoneNumber(),
-          command.getRecipientPhoneNumber(),
-          command.getAmount(),
-          true,
-          null
-        );
-        sendCompleteTransferCommandInternal(
-          command.getCorrelationId(),
-          command.getSenderPhoneNumber(),
-          command.getRecipientPhoneNumber(),
-          command.getAmount()
-        );
-      } else {
-        sendFundsProcessedEventInternal(
-          command.getCorrelationId(),
-          command.getSenderPhoneNumber(),
-          command.getRecipientPhoneNumber(),
-          command.getAmount(),
-          false,
-          "Final debit failed due to an unexpected internal error."
-        );
-      }
-    } else {
       // Отправляем FundsProcessedEvent об отмене резерва
       sendFundsProcessedEventInternal(
         command.getCorrelationId(),
         command.getSenderPhoneNumber(),
         command.getRecipientPhoneNumber(),
+        null, // Email получателя не актуален для отмены резерва
         command.getAmount(),
-        false,
+        false, // success = false, т.к. это отмена, а не успешное завершение
         "Funds reservation cancelled/rolled back."
       );
     }
   }
 
-  // Внутренний метод для отправки SendConfirmationCodeCommand
   private void sendToNotificationService(SendConfirmationCodeCommand command) {
     try {
       jmsTemplate.convertAndSend(
@@ -298,36 +335,41 @@ public class AccountServiceImpl implements AccountService {
         e.getMessage(),
         e
       );
-      throw new RuntimeException("Failed to send confirmation code command", e); // Откатит JTA
+      throw new RuntimeException(
+        "Failed to send confirmation code command to NotificationService",
+        e
+      );
     }
   }
 
-  // Внутренний метод для отправки FundsProcessedEvent
   private void sendFundsProcessedEventInternal(
     UUID correlationId,
-    String sender,
-    String recipient,
+    String senderPhoneNumber,
+    String recipientPhoneNumber, // Может быть null
+    String recipientEmail, // Может быть null
     BigDecimal amount,
     boolean success,
     String reason
   ) {
     FundsProcessedEvent event = FundsProcessedEvent.builder()
       .correlationId(correlationId)
-      .senderPhoneNumber(sender)
-      .recipientPhoneNumber(recipient)
+      .senderPhoneNumber(senderPhoneNumber)
+      .recipientPhoneNumber(recipientPhoneNumber)
+      .recipientEmail(recipientEmail) // Устанавливаем email
       .amount(amount)
       .success(success)
       .reason(reason)
       .build();
     try {
       jmsTemplate.convertAndSend(
-        JmsQueueNames.TRANSFER_PROCESS_EIS_CMD_QUEUE, // Очередь для transfer-service
+        JmsQueueNames.TRANSFER_PROCESS_EIS_CMD_QUEUE,
         event
-      );
+      ); // Очередь для transfer-service
       log.info(
-        "Sent FundsProcessedEvent: correlationId={}, success={}",
+        "Sent FundsProcessedEvent: correlationId={}, success={}, recipientEmail={}",
         event.getCorrelationId(),
-        event.isSuccess()
+        event.isSuccess(),
+        event.getRecipientEmail()
       );
     } catch (Exception e) {
       log.error(
@@ -336,21 +378,23 @@ public class AccountServiceImpl implements AccountService {
         e.getMessage(),
         e
       );
-      throw new RuntimeException("Failed to send funds processed event", e); // Откатит JTA
+      throw new RuntimeException(
+        "Failed to send FundsProcessedEvent to TransferService",
+        e
+      );
     }
   }
 
-  // Внутренний метод для отправки CompleteTransferCommand
   private void sendCompleteTransferCommandInternal(
     UUID correlationId,
-    String sender,
-    String recipient,
+    String senderPhoneNumber,
+    String recipientPhoneNumber,
     BigDecimal amount
   ) {
     CompleteTransferCommand command = CompleteTransferCommand.builder()
       .correlationId(correlationId)
-      .senderPhoneNumber(sender)
-      .recipientPhoneNumber(recipient)
+      .senderPhoneNumber(senderPhoneNumber)
+      .recipientPhoneNumber(recipientPhoneNumber)
       .amount(amount)
       .build();
     try {
@@ -372,7 +416,7 @@ public class AccountServiceImpl implements AccountService {
         e.getMessage(),
         e
       );
-      throw new RuntimeException("Failed to send complete transfer command", e); // Откатит JTA
+      throw new RuntimeException("Failed to send CompleteTransferCommand", e);
     }
   }
 }

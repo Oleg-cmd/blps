@@ -116,13 +116,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <!-- Если transfer-service будет вызывать sbp-adapter-service по HTTP, может понадобиться HTTP-клиент -->
-        <!-- Например, Spring WebClient (реактивный) или RestTemplate (блокирующий) -->
-        <!-- <dependency> -->
-        <!--     <groupId>org.springframework.boot</groupId> -->
-        <!--     <artifactId>spring-boot-starter-webflux</artifactId> --> <!-- Для WebClient -->
-        <!-- </dependency> -->
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -135,9 +128,9 @@
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
-            <artifactId>mockito-inline</artifactId> <!-- Уже есть в account-service, хорошо бы иметь и здесь -->
+            <artifactId>mockito-inline</artifactId>
             <scope>test</scope>
-            <version>5.2.0</version> <!-- Убедись, что версия совпадает или управляется в родительском POM -->
+            <version>5.2.0</version>
         </dependency>
                     
         <dependency>
@@ -149,14 +142,13 @@
         <dependency>
             <groupId>jakarta.platform</groupId>
             <artifactId>jakarta.jakartaee-api</artifactId>
-            <version>10.0.0</version> <!-- или другая версия Jakarta EE -->
-            <scope>provided</scope> <!-- Если вы не в полноценном EE контейнере, возможно, compile -->
+            <version>10.0.0</version> 
+            <scope>provided</scope>
         </dependency>
-        <!-- Или только API коннекторов: -->
         <dependency>
             <groupId>jakarta.resource</groupId>
             <artifactId>jakarta.resource-api</artifactId>
-            <version>2.1.0</version> <!-- Проверьте актуальную версию -->
+            <version>2.1.0</version>
         </dependency>
 
     

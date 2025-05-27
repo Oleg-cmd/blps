@@ -1,9 +1,8 @@
-package sbp.transfer.service.handler.impl; // Реализации хендлеров
+package sbp.transfer.service.handler.impl;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jms.core.JmsTemplate;
 import org.springframework.stereotype.Service;
 import sbp.dto.EisService;
@@ -25,19 +24,16 @@ public class FundsProcessedEventHandlerImpl
 
   private final TransferRepository transferRepository;
   private final JmsTemplate jmsTemplate;
-
   private final EisService eisService;
-
-  private static final String DEFAULT_RECIPIENT_EMAIL_FOR_CHEQUE =
-    "cheque_recipient@example.com";
 
   @Override
   @Transactional(Transactional.TxType.REQUIRED)
   public void handleEvent(FundsProcessedEvent event) {
     log.info(
-      "[{}] Handling FundsProcessedEvent. Success: {}, Reason: {}",
+      "[{}] Handling FundsProcessedEvent. Success: {}, RecipientEmail: {}, Reason: {}",
       event.getCorrelationId(),
       event.isSuccess(),
+      event.getRecipientEmail(),
       event.getReason()
     );
 
@@ -48,6 +44,8 @@ public class FundsProcessedEventHandlerImpl
           "[{}] CRITICAL: Transfer not found for FundsProcessedEvent.",
           event.getCorrelationId()
         );
+        // Если трансфер не найден, дальнейшая обработка невозможна.
+        // JTA транзакция откатится (если была начата слушателем).
         return new IllegalStateException(
           "Transfer not found by correlationId: " +
           event.getCorrelationId() +
@@ -62,6 +60,17 @@ public class FundsProcessedEventHandlerImpl
       transfer.getStatus()
     );
 
+    // Проверяем, что событие не устарело (трансфер уже в финальном статусе)
+    if (isTransferInFinalState(transfer.getStatus())) {
+      log.warn(
+        "[{}] Transfer (DB ID: {}) is already in a final state ({}). Ignoring FundsProcessedEvent.",
+        transfer.getCorrelationId(),
+        transfer.getId(),
+        transfer.getStatus()
+      );
+      return;
+    }
+
     switch (transfer.getStatus()) {
       case PROCESSING_RESERVATION:
         processReservationResponse(transfer, event);
@@ -71,11 +80,14 @@ public class FundsProcessedEventHandlerImpl
         break;
       default:
         log.warn(
-          "[{}] Received FundsProcessedEvent for transfer (DB ID: {}) with unexpected status: {}. Ignoring event.",
+          "[{}] Received FundsProcessedEvent for transfer (DB ID: {}) with unexpected status: {}. Current logic might not handle this. Event success: {}, reason: {}",
           transfer.getCorrelationId(),
           transfer.getId(),
-          transfer.getStatus()
+          transfer.getStatus(),
+          event.isSuccess(),
+          event.getReason()
         );
+
         return;
     }
     transferRepository.save(transfer);
@@ -87,6 +99,23 @@ public class FundsProcessedEventHandlerImpl
     );
   }
 
+  private boolean isTransferInFinalState(TransferStatus status) {
+    return switch (status) {
+      case SUCCESSFUL,
+        FAILED,
+        RESERVATION_FAILED,
+        CONFIRMATION_FAILED,
+        SBP_ERROR,
+        FUNDS_TRANSFER_FAILED,
+        EIS_ERROR,
+        LIMIT_EXCEEDED,
+        INVALID_RECIPIENT,
+        TIMEOUT,
+        CANCELLED -> true;
+      default -> false;
+    };
+  }
+
   private void processReservationResponse(
     Transfer transfer,
     FundsProcessedEvent event
@@ -94,8 +123,9 @@ public class FundsProcessedEventHandlerImpl
     if (event.isSuccess()) {
       transfer.setStatus(TransferStatus.AWAITING_CONFIRMATION);
       log.info(
-        "[{}] Funds successfully reserved. Transfer status -> AWAITING_CONFIRMATION.",
-        transfer.getCorrelationId()
+        "[{}] Funds successfully reserved. Transfer (DB ID: {}) status -> AWAITING_CONFIRMATION.",
+        transfer.getCorrelationId(),
+        transfer.getId()
       );
     } else {
       transfer.setStatus(TransferStatus.RESERVATION_FAILED);
@@ -105,11 +135,12 @@ public class FundsProcessedEventHandlerImpl
           : "Funds reservation failed at AccountService."
       );
       log.warn(
-        "[{}] Funds reservation failed. Reason: {}. Transfer status -> RESERVATION_FAILED.",
+        "[{}] Funds reservation failed for Transfer (DB ID: {}). Reason: {}. Status -> RESERVATION_FAILED.",
         transfer.getCorrelationId(),
+        transfer.getId(),
         transfer.getFailureReason()
       );
-      sendFailureNotification(transfer);
+      sendFailureNotification(transfer); // Уведомляем пользователя о неудаче резервирования
     }
   }
 
@@ -120,18 +151,40 @@ public class FundsProcessedEventHandlerImpl
     if (event.isSuccess()) {
       transfer.setStatus(TransferStatus.PROCESSING_EIS);
       log.info(
-        "[{}] Final funds debit/credit successful. Transfer status -> PROCESSING_EIS.",
-        transfer.getCorrelationId()
+        "[{}] Final funds debit/credit successful. Transfer (DB ID: {}) status -> PROCESSING_EIS.",
+        transfer.getCorrelationId(),
+        transfer.getId()
       );
-      try {
-        log.info(
-          "[{}] Attempting to send electronic cheque via EIS for transfer (DB ID: {}).",
+
+      String recipientEmail = event.getRecipientEmail();
+
+      if (recipientEmail == null || recipientEmail.isBlank()) {
+        log.warn(
+          "[{}] Recipient email is not available in FundsProcessedEvent for transfer (DB ID: {}). Electronic cheque will not be sent.",
           transfer.getCorrelationId(),
           transfer.getId()
         );
+        // Чек не отправляем, но перевод считаем успешным на этом этапе
+        transfer.setStatus(TransferStatus.SUCCESSFUL);
+        log.info(
+          "[{}] Transfer (DB ID: {}) marked SUCCESSFUL without sending cheque (recipient email missing).",
+          transfer.getCorrelationId(),
+          transfer.getId()
+        );
+        sendSuccessNotification(transfer);
+        return;
+      }
+
+      try {
+        log.info(
+          "[{}] Attempting to send electronic cheque via EIS for transfer (DB ID: {}) to email: {}.",
+          transfer.getCorrelationId(),
+          transfer.getId(),
+          recipientEmail
+        );
         ChequeDetailsDTO chequeDetails = ChequeDetailsDTO.builder()
           .transactionId(transfer.getId())
-          .recipientEmail(DEFAULT_RECIPIENT_EMAIL_FOR_CHEQUE)
+          .recipientEmail(recipientEmail)
           .senderInfo("SBP Transfer from: " + transfer.getSenderPhoneNumber())
           .recipientInfo(
             "To: " +
@@ -152,26 +205,34 @@ public class FundsProcessedEventHandlerImpl
           )
           .operationDetails("SBP Transfer Payment")
           .build();
-        eisService.sendElectronicCheque(chequeDetails);
+
+        eisService.sendElectronicCheque(chequeDetails); // Вызываем JCA коннектор
+
         transfer.setStatus(TransferStatus.SUCCESSFUL);
         log.info(
-          "[{}] EIS processing successful. Transfer status -> SUCCESSFUL.",
-          transfer.getCorrelationId()
+          "[{}] EIS processing (cheque sending) successful for transfer (DB ID: {}). Status -> SUCCESSFUL.",
+          transfer.getCorrelationId(),
+          transfer.getId()
         );
-        sendSuccessNotification(transfer);
+        sendSuccessNotification(transfer); // Уведомляем об успешном завершении всего процесса
       } catch (Exception e) {
+        // Эта ошибка от JCA-коннектора
         log.error(
-          "[{}] Error sending electronic cheque via EIS for transfer (DB ID: {}): {}. Transfer status -> EIS_ERROR.",
+          "[{}] Error sending electronic cheque via EIS for transfer (DB ID: {}): {}. Status -> EIS_ERROR.",
           transfer.getCorrelationId(),
           transfer.getId(),
           e.getMessage(),
-          e
+          e // Полный стектрейс ошибки
         );
         transfer.setStatus(TransferStatus.EIS_ERROR);
         transfer.setFailureReason("EIS error: " + e.getMessage());
-        sendFailureNotification(transfer);
+        // Важно: Основной перевод средств УЖЕ прошел успешно в AccountService.
+        // Ошибка EIS не должна откатывать перевод денег.
+        // Поэтому мы все равно отправляем пользователю уведомление об УСПЕШНОМ ПЕРЕВОДЕ.
+        // А проблема с чеком - это внутренняя проблема, которую можно отдельно мониторить.
+        sendSuccessNotification(transfer);
       }
-    } else {
+    } else { // FundsProcessedEvent.success == false на этапе финального списания
       transfer.setStatus(TransferStatus.FUNDS_TRANSFER_FAILED);
       transfer.setFailureReason(
         event.getReason() != null
@@ -179,8 +240,9 @@ public class FundsProcessedEventHandlerImpl
           : "Final funds debit/credit failed at AccountService."
       );
       log.warn(
-        "[{}] Final funds debit/credit failed. Reason: {}. Transfer status -> FUNDS_TRANSFER_FAILED.",
+        "[{}] Final funds debit/credit failed for Transfer (DB ID: {}). Reason: {}. Status -> FUNDS_TRANSFER_FAILED.",
         transfer.getCorrelationId(),
+        transfer.getId(),
         transfer.getFailureReason()
       );
       sendFailureNotification(transfer);
@@ -188,7 +250,10 @@ public class FundsProcessedEventHandlerImpl
   }
 
   private void sendSuccessNotification(Transfer transfer) {
-    if (transfer == null) return;
+    if (transfer == null) {
+      log.warn("Attempted to send success notification for a null transfer.");
+      return;
+    }
     SendSuccessNotificationCommand cmd =
       SendSuccessNotificationCommand.builder()
         .correlationId(transfer.getCorrelationId())
@@ -207,27 +272,37 @@ public class FundsProcessedEventHandlerImpl
         cmd
       );
       log.info(
-        "[{}] Sent SendSuccessNotificationCommand.",
-        transfer.getCorrelationId()
+        "[{}] Sent SendSuccessNotificationCommand for transfer (DB ID: {}).",
+        transfer.getCorrelationId(),
+        transfer.getId()
       );
     } catch (Exception e) {
       log.error(
-        "[{}] Failed to send SendSuccessNotificationCommand: {}",
+        "[{}] Failed to send SendSuccessNotificationCommand for transfer (DB ID: {}): {}",
         transfer.getCorrelationId(),
+        transfer.getId(),
         e.getMessage(),
         e
       );
+      // Ошибка отправки уведомления не должна откатывать JTA транзакцию, если основная операция завершена.
     }
   }
 
   private void sendFailureNotification(Transfer transfer) {
-    if (transfer == null) return;
+    if (transfer == null) {
+      log.warn("Attempted to send failure notification for a null transfer.");
+      return;
+    }
     SendFailureNotificationCommand cmd =
       SendFailureNotificationCommand.builder()
         .correlationId(transfer.getCorrelationId())
         .senderPhoneNumber(transfer.getSenderPhoneNumber())
         .amount(transfer.getAmount())
-        .reason(transfer.getFailureReason())
+        .reason(
+          transfer.getFailureReason() != null
+            ? transfer.getFailureReason()
+            : "Unknown error"
+        )
         .build();
     try {
       jmsTemplate.convertAndSend(
@@ -235,14 +310,16 @@ public class FundsProcessedEventHandlerImpl
         cmd
       );
       log.info(
-        "[{}] Sent SendFailureNotificationCommand. Reason: {}",
+        "[{}] Sent SendFailureNotificationCommand for transfer (DB ID: {}). Reason: {}",
         transfer.getCorrelationId(),
-        transfer.getFailureReason()
+        transfer.getId(),
+        cmd.getReason()
       );
     } catch (Exception e) {
       log.error(
-        "[{}] Failed to send SendFailureNotificationCommand: {}",
+        "[{}] Failed to send SendFailureNotificationCommand for transfer (DB ID: {}): {}",
         transfer.getCorrelationId(),
+        transfer.getId(),
         e.getMessage(),
         e
       );

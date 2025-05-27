@@ -56,9 +56,6 @@ public class EmailManagedConnectionFactoryImpl
     Subject subject,
     ConnectionRequestInfo cxRequestInfo
   ) throws ResourceException {
-    // Простая реализация: JCA-контейнер будет искать подходящее соединение в пуле.
-    // Для нашего "облегченного" варианта можно вернуть null или первое подходящее, если бы мы реализовывали пулинг.
-    // В простейшем случае (нет пула), этот метод может не вызываться или его реализация некритична.
     if (connectionSet == null || connectionSet.isEmpty()) {
       return null;
     }

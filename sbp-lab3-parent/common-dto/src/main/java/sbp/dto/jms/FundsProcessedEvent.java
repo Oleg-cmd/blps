@@ -16,10 +16,11 @@ public class FundsProcessedEvent implements Serializable {
 
   private static final long serialVersionUID = 1L;
 
-  private UUID correlationId; // ID оригинального перевода (Transfer.id)
+  private UUID correlationId;
   private String senderPhoneNumber;
-  private String recipientPhoneNumber;
+  private String recipientPhoneNumber; // Номер телефона получателя
+  private String recipientEmail; // Email получателя
   private BigDecimal amount;
-  private boolean success; // true, если списание и зачисление в AccountService прошли успешно
-  private String reason; // Причина неудачи, если success = false
+  private boolean success;
+  private String reason;
 }

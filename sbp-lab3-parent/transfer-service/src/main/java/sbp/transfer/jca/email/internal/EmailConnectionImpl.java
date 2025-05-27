@@ -1,7 +1,12 @@
 package sbp.transfer.jca.email.internal;
 
 import jakarta.mail.internet.MimeMessage;
+import jakarta.resource.NotSupportedException;
 import jakarta.resource.ResourceException;
+import jakarta.resource.cci.ConnectionMetaData;
+import jakarta.resource.cci.Interaction;
+import jakarta.resource.cci.LocalTransaction;
+import jakarta.resource.cci.ResultSetInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -33,14 +38,11 @@ public class EmailConnectionImpl implements EmailConnection {
         true,
         "UTF-8"
       );
-
       helper.setFrom(mailFrom);
       helper.setTo(chequeDetails.getRecipientEmail());
       helper.setSubject(chequeDetails.getSubject());
-
       String emailBody = buildChequeEmailBody(chequeDetails);
       helper.setText(emailBody, true);
-
       mailSender.send(mimeMessage);
       log.debug(
         "EmailConnection: Successfully sent electronic cheque to {} for transaction ID: {}",
@@ -63,8 +65,6 @@ public class EmailConnectionImpl implements EmailConnection {
     log.debug(
       "EmailConnection: close() called. No specific resources to release for JavaMailSender."
     );
-    // Для JavaMailSender, управляемого Spring, обычно нечего закрывать.
-    // Если бы это было сырое SMTP-соединение, здесь было бы его закрытие.
   }
 
   private String buildChequeEmailBody(ChequeDetailsDTO details) {
@@ -98,5 +98,48 @@ public class EmailConnectionImpl implements EmailConnection {
     sb.append("<hr><p>Thank you for using SBP!</p>");
     sb.append("</body></html>");
     return sb.toString();
+  }
+
+  // --- Реализация методов из jakarta.resource.cci.Connection ---
+
+  @Override
+  public Interaction createInteraction() throws ResourceException {
+    throw new NotSupportedException(
+      "Interactions not supported by this EmailConnection"
+    );
+  }
+
+  @Override
+  public LocalTransaction getLocalTransaction() throws ResourceException {
+    throw new NotSupportedException(
+      "Local transactions not supported at CCI level for this EmailConnection"
+    );
+  }
+
+  @Override
+  public ConnectionMetaData getMetaData() throws ResourceException {
+    return new ConnectionMetaData() {
+      @Override
+      public String getEISProductName() throws ResourceException {
+        return "SMTP Email Service";
+      }
+
+      @Override
+      public String getEISProductVersion() throws ResourceException {
+        return "N/A";
+      }
+
+      @Override
+      public String getUserName() throws ResourceException {
+        return null;
+      }
+    };
+  }
+
+  @Override
+  public ResultSetInfo getResultSetInfo() throws ResourceException {
+    throw new NotSupportedException(
+      "ResultSetInfo not supported by this EmailConnection"
+    );
   }
 }

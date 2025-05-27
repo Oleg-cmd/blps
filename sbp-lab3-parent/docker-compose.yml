@@ -103,10 +103,10 @@ services:
       POSTGRES_PASSWORD: your_transfer_password
       POSTGRES_XA_RESOURCE_NAME: transferPostgresXA
       SBP_ADAPTER_BASE_URL: http://sbp-adapter-service:8083
-      EIS_MAIL_HOST: your_mailtrap_smtp_host
-      EIS_MAIL_PORT: "2525"
-      EIS_MAIL_USER: your_mailtrap_user
-      EIS_MAIL_PASSWORD: your_mailtrap_password
+      EIS_MAIL_HOST: sandbox.smtp.mailtrap.io
+      EIS_MAIL_PORT: "25"
+      EIS_MAIL_USER: 073f8f35d5c893
+      EIS_MAIL_PASSWORD: d63b2dc01968a5
       EIS_MAIL_FROM: no-reply@sbp-lab.com
       JAAS_CONFIG_PATH: classpath:jaas.conf
     depends_on:

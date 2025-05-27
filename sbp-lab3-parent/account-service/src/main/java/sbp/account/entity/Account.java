@@ -2,6 +2,7 @@ package sbp.account.entity;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -38,13 +39,23 @@ public class Account {
   @Column(nullable = false, precision = 19, scale = 2)
   private BigDecimal reservedAmount;
 
+  @Email(message = "Email should be a valid email address")
+  @Column(length = 100)
+  private String email;
+
   @Version
   private Long version; // Для оптимистичной блокировки
 
-  // Конструктор для удобного создания счета с начальными значениями
   public Account(String phoneNumber) {
     this.phoneNumber = phoneNumber;
     this.balance = BigDecimal.ZERO;
     this.reservedAmount = BigDecimal.ZERO;
+  }
+
+  public Account(String phoneNumber, String email) {
+    this.phoneNumber = phoneNumber;
+    this.balance = BigDecimal.ZERO;
+    this.reservedAmount = BigDecimal.ZERO;
+    this.email = email;
   }
 }
