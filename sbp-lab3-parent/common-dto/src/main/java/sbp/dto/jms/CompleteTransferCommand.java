@@ -1,5 +1,6 @@
 package sbp.dto.jms;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
@@ -11,7 +12,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CompleteTransferCommand {
+public class CompleteTransferCommand implements Serializable {
 
   private UUID correlationId; // Для сквозного отслеживания
   private String senderPhoneNumber; // Номер телефона отправителя
