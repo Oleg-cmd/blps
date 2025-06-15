@@ -1,0 +1,218 @@
+services:
+  activemq:
+    image: symptoma/activemq:5.18.3
+    platform: linux/arm64
+    container_name: sbp-activemq
+    ports:
+      - "61616:61616"
+      - "8161:8161" 
+    environment:
+      ACTIVEMQ_BROKER_NAME: sbpBroker
+      ACTIVEMQ_ADMIN_LOGIN: admin
+      ACTIVEMQ_ADMIN_PASSWORD: admin
+      ACTIVEMQ_USERS_sbpuser: sbppassword
+      ACTIVEMQ_GROUPS_activemq_admin: sbpuser
+    volumes:
+      - activemq_data:/opt/activemq/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -u admin:admin -f http://localhost:8161/api/jolokia/read/org.apache.activemq:type=Broker,brokerName=sbpBroker/BrokerName || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - sbp_network
+  postgres:
+    image: postgres:14-alpine
+    platform: linux/arm64
+    container_name: sbp-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: sbp_lab_admin
+      POSTGRES_PASSWORD: your_admin_password
+
+      POSTGRES_DEFAULT_DB: postgres
+      
+      POSTGRES_TRANSFER_DB_NAME: transfer_db
+      POSTGRES_TRANSFER_USER: transfer_user
+      POSTGRES_TRANSFER_PASSWORD: your_transfer_password
+
+      POSTGRES_ACCOUNT_DB_NAME: account_db
+      POSTGRES_ACCOUNT_USER: account_user
+      POSTGRES_ACCOUNT_PASSWORD: your_account_password
+
+      POSTGRES_CAMUNDA_DB_NAME: camunda_db
+      POSTGRES_CAMUNDA_USER: camunda_user
+      POSTGRES_CAMUNDA_PASSWORD: your_camunda_password
+
+      LC_ALL: "C.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres_init:/docker-entrypoint-initdb.d
+    command: postgres -c max_prepared_transactions=100
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U sbp_lab_admin -d postgres"]
+        interval: 10s
+        timeout: 5s
+        retries: 10
+    networks:
+      - sbp_network
+
+  camunda:
+    image: camunda/camunda-bpm-platform:run-7.20.0
+    container_name: sbp-camunda
+    hostname: camunda-engine
+    ports:
+      - "8088:8080"
+    environment:
+      - "TZ=Europe/Moscow"
+      - DB_DRIVER=org.postgresql.Driver
+      - DB_URL=jdbc:postgresql://postgres:5432/camunda_db
+      - DB_USERNAME=camunda_user
+      - DB_PASSWORD=your_camunda_password
+      - "WAIT_FOR=postgres:5432"
+      - "CAMUNDA_BPM_RUN_EXAMPLE_ENABLED=false" 
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sbp_network
+    volumes:
+      - camunda_test_data:/camunda/internal/data
+      - ./my-default.yml:/camunda/configuration/default.yml
+
+  transfer-service:
+    build:
+      context: .
+      dockerfile: transfer-service/src/main/Dockerfile
+    container_name: sbp-transfer-service
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: 8080
+      SPRING_APPLICATION_NAME: transfer-service
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Xmx256m -Xms128m -Dfile.encoding=UTF-8"
+      SPRING_JTA_ENABLED: "true"
+      ATOMIKOS_LOG_BASE_NAME: tx-transfer-service
+      ATOMIKOS_LOG_BASE_DIR: ./atomikos-logs/transfer
+      ATOMIKOS_MAX_TIMEOUT: "300000"
+      # ActiveMQ Connection
+      ACTIVEMQ_BROKER_URL: tcp://activemq:61616
+      ACTIVEMQ_USER: admin
+      ACTIVEMQ_PASSWORD: admin
+      ACTIVEMQ_XA_RESOURCE_NAME: activemqXATransfer
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB_NAME: transfer_db
+      POSTGRES_USER: transfer_user
+      POSTGRES_PASSWORD: your_transfer_password
+      POSTGRES_XA_RESOURCE_NAME: transferPostgresXA
+      SBP_ADAPTER_BASE_URL: http://sbp-adapter-service:8083
+      EIS_MAIL_HOST: sandbox.smtp.mailtrap.io
+      EIS_MAIL_PORT: "25"
+      EIS_MAIL_USER: 073f8f35d5c893
+      EIS_MAIL_PASSWORD: d63b2dc01968a5
+      EIS_MAIL_FROM: no-reply@sbp-lab.com
+      JAAS_CONFIG_PATH: classpath:jaas.conf
+    depends_on:
+      activemq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      sbp-adapter-service:
+        condition: service_started
+      camunda:
+        condition: service_started
+    networks:
+      - sbp_network
+
+  account-service:
+    build:
+      context: .
+      dockerfile: account-service/src/main/Dockerfile
+    container_name: sbp-account-service
+    ports:
+      - "8081:8081"
+    environment:
+      SERVER_PORT: 8081
+      SPRING_APPLICATION_NAME: account-service
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Xmx256m -Xms128m -Dfile.encoding=UTF-8"
+      SPRING_JTA_ENABLED: "true"
+      ATOMIKOS_LOG_BASE_NAME: tx-account-service
+      ATOMIKOS_LOG_BASE_DIR: ./atomikos-logs/account
+      ATOMIKOS_MAX_TIMEOUT: "300000"
+      # ActiveMQ Connection
+      ACTIVEMQ_BROKER_URL: tcp://activemq:61616
+      ACTIVEMQ_USER: admin
+      ACTIVEMQ_PASSWORD: admin
+      ACTIVEMQ_XA_RESOURCE_NAME: activemqXAAccount
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB_NAME: ${POSTGRES_ACCOUNT_DB_NAME:-account_db}
+      POSTGRES_USER: ${POSTGRES_ACCOUNT_USER:-account_user}
+      POSTGRES_PASSWORD: ${POSTGRES_ACCOUNT_PASSWORD:-your_account_password}
+      POSTGRES_XA_RESOURCE_NAME: accountPostgresXA
+    depends_on:
+      activemq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - sbp_network
+
+  notification-service:
+    platform: linux/arm64
+    build:
+      context: .
+      dockerfile: notification-service/src/main/Dockerfile
+    container_name: sbp-notification-service
+    ports:
+      - "8082:8082"
+    environment:
+      SERVER_PORT: 8082
+      SPRING_APPLICATION_NAME: notification-service
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Xmx128m -Xms64m -Dfile.encoding=UTF-8"
+      # ActiveMQ Connection
+      ACTIVEMQ_BROKER_URL: tcp://activemq:61616
+      ACTIVEMQ_USER: admin
+      ACTIVEMQ_PASSWORD: admin
+      ACTIVEMQ_XA_RESOURCE_NAME: activemqXANotification
+      SPRING_JTA_ENABLED: "true"
+      ATOMIKOS_LOG_BASE_NAME: tx-notification-service
+      ATOMIKOS_LOG_BASE_DIR: ./atomikos-logs/notification
+      ATOMIKOS_MAX_TIMEOUT: "300000"  
+      CONFIRMATION_CODE_STORAGE_TYPE: IN_MEMORY
+    depends_on:
+      activemq:
+        condition: service_healthy
+    networks:
+      - sbp_network
+
+  sbp-adapter-service:
+    build:
+      context: .
+      dockerfile: sbp-adapter-service/src/main/Dockerfile
+    container_name: sbp-adapter-service
+    ports:
+      - "8083:8083"
+    environment:
+      SERVER_PORT: 8083
+      SPRING_APPLICATION_NAME: sbp-adapter-service
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Xmx128m -Xms64m -Dfile.encoding=UTF-8"
+    networks:
+      - sbp_network
+
+volumes:
+  postgres_data:
+  activemq_data: {}
+  camunda_test_data:
+
+networks:
+  sbp_network:
+    driver: bridge

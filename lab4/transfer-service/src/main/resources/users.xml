@@ -1,0 +1,11 @@
+<users>
+      <user username="user"
+          password="$2a$12$RCay63g85IhC.9Qj6YPcVeZtNOtCKtAJhutun/3gwwBxaAlQ0iJeu"
+          roles="ROLE_USER" />
+      <user username="admin"
+          password="$2a$12$N9zYCGcR5zoXZdNmjGvgLOQCT7RJIOKq/cNcevCfjpjdItVWtvpfe"
+          roles="ROLE_USER,ROLE_ADMIN"/>
+      <user username="9991112222"
+          password="$2a$12$RCay63g85IhC.9Qj6YPcVeZtNOtCKtAJhutun/3gwwBxaAlQ0iJeu"
+          roles="ROLE_USER" />
+</users>
